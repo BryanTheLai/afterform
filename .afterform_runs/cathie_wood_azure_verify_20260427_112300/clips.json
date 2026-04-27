@@ -1,0 +1,404 @@
+{
+  "source_path": "",
+  "clips": [
+    {
+      "clip_id": "001",
+      "topic": "Dollar consensus wrong",
+      "start_time_sec": 863.9,
+      "end_time_sec": 949.8,
+      "viral_hook": "But how high will the dollar get",
+      "virality_score": 0.826,
+      "transcript": "But how high will the dollar get Last year the narrative was the U.S. exceptionalism is dead the dollar is in decline and it's inexorable It's going to continue And you can see here many people believe that the dollar will end the year as measured by the DXY at 1036 Now that is very interesting to us because you can see on the next page where we are in the context of history We are just below 99 So what Calixte is suggesting is the people who are willing to trade or make a prediction they actually think the dollar is going to go up And that goes against conventional wisdom Now we agree that it is going to go up mostly because of what I just mentioned about foreign direct investment and our capital-friendly business-friendly tax policies Also deregulation is we think going to increase the return on investment in the United States relative to that in the rest of the world That is dollar positive",
+      "suggested_overlay_title": "Dollar Going Higher",
+      "layout": null,
+      "hook_start_sec": 0.0,
+      "hook_end_sec": 2.8,
+      "trim_start_sec": 0.0,
+      "trim_end_sec": 0.0,
+      "shorts_title": "Kathy Wood Says the Dollar Could Rise Despite What Everyone Thinks",
+      "description": "This clip breaks down why ARK thinks the market is underestimating dollar strength and why that view runs against the dominant narrative.",
+      "hashtags": [
+        "dollar",
+        "dxy",
+        "macro",
+        "arkinvest",
+        "kathywood",
+        "markets"
+      ],
+      "layout_hint": "split_chart_person",
+      "selection_reason": "Composite 0.71 because it starts with a direct macro question, flips consensus immediately, and is anchored to a chart viewers can follow visually.",
+      "rule_scores": [
+        {
+          "rule_id": "hook_strength",
+          "score": 0.78,
+          "reason": "Opens with a direct macro question tied to a major market variable."
+        },
+        {
+          "rule_id": "counterintuitive_claim",
+          "score": 0.92,
+          "reason": "Explicitly says the dollar will rise against conventional wisdom."
+        },
+        {
+          "rule_id": "chart_reference",
+          "score": 0.88,
+          "reason": "The segment repeatedly references the DXY chart and historical context slide."
+        },
+        {
+          "rule_id": "self_contained",
+          "score": 0.8,
+          "reason": "The thesis is understandable without needing earlier discussion."
+        },
+        {
+          "rule_id": "named_entity",
+          "score": 0.4,
+          "reason": "References the U.S. and DXY but no especially strong person or company callout."
+        }
+      ],
+      "needs_review": false,
+      "review_reason": "",
+      "keep_ranges_sec": []
+    },
+    {
+      "clip_id": "002",
+      "topic": "Debt versus equity",
+      "start_time_sec": 685.0,
+      "end_time_sec": 774.2,
+      "viral_hook": "Here is another take and I'm going to credit Don Lustwin from Trend Macro for this chart",
+      "virality_score": 0.7925,
+      "transcript": "Here is another take and I'm going to credit Don Lustwin from Trend Macro for this chart And what he does trying to help people understand the debt and the deficit situation is he says you know when you compare debt to GDP what you're comparing is a balance sheet item to an income statement item the equivalent of Really you should be comparing debt to equity So equity is the black line debt is the purple and GDP is the red And if we go to the next chart you will see that while debt to GDP is above one here the one ratio you can see debt to equity is at 0.5 And actually it's very low by historical standards The other thing I will say is if you look at debt to assets another balance sheet item the asset side of the U.S. balance sheet is really at cost What did the land cost What did the gold cost when it went onto the federal balance sheet Well some of these costs were 50 to 75 years ago",
+      "suggested_overlay_title": "Debt Metric Is Wrong",
+      "layout": null,
+      "hook_start_sec": 0.0,
+      "hook_end_sec": 5.8,
+      "trim_start_sec": 0.0,
+      "trim_end_sec": 0.0,
+      "shorts_title": "Kathy Wood Says We’re Measuring U.S. Debt the Wrong Way",
+      "description": "This clip reframes the debt panic by arguing that debt-to-GDP is the wrong comparison and that debt-to-equity tells a very different story.",
+      "hashtags": [
+        "debt",
+        "gdp",
+        "macro",
+        "kathywood",
+        "trendmacro",
+        "economics"
+      ],
+      "layout_hint": "split_chart_person",
+      "selection_reason": "Composite 0.65 because it challenges a common macro framing with a clean visual argument and a named source, making it highly clip-friendly.",
+      "rule_scores": [
+        {
+          "rule_id": "hook_strength",
+          "score": 0.74,
+          "reason": "Opens by promising a new take on a heavily debated debt issue."
+        },
+        {
+          "rule_id": "counterintuitive_claim",
+          "score": 0.85,
+          "reason": "Says debt to GDP is the wrong framework and debt to equity looks low historically."
+        },
+        {
+          "rule_id": "chart_reference",
+          "score": 0.9,
+          "reason": "Entire segment is built around a named chart and line comparisons."
+        },
+        {
+          "rule_id": "self_contained",
+          "score": 0.72,
+          "reason": "The explanation is understandable on its own."
+        },
+        {
+          "rule_id": "named_entity",
+          "score": 0.55,
+          "reason": "Names Don Lustwin and Trend Macro directly."
+        }
+      ],
+      "needs_review": false,
+      "review_reason": "",
+      "keep_ranges_sec": []
+    },
+    {
+      "clip_id": "003",
+      "topic": "Boom with bad sentiment",
+      "start_time_sec": 2116.0,
+      "end_time_sec": 2203.5,
+      "viral_hook": "can see this is an outright boom",
+      "virality_score": 0.7875,
+      "transcript": "can see this is an outright boom It's an indicator that I believe that Piper Sandler gave us or produced And you can see it is flat This is U.S. Flatbed Truck Market Demand Index So this is an indicator that something's booming out there And no one's using the word boom but I think there is a call to action The pricing certainly is one reason But I also think there's a lot more foreign direct investment coming into the United States Some of it might be tariff related Some of it is because deregulation and tax policy are so friendly So that's interesting You can see on the services sector both orders and unfortunately prices Prices again I think being impacted by what's going on in the Middle East and it may be opportunistic pricing around that Normally when we see new orders pick up the prices are coming down And I do think that the purple chart will resolve to the downside once the Middle East turmoil clears up to some extent Here is why the pricing is not getting through Sentiment is terrible as measured by the University of Michigan",
+      "suggested_overlay_title": "Boom Nobody Sees",
+      "layout": null,
+      "hook_start_sec": 0.0,
+      "hook_end_sec": 3.1,
+      "trim_start_sec": 0.0,
+      "trim_end_sec": 0.0,
+      "shorts_title": "Kathy Wood Says There’s a Boom Happening That Nobody Wants to Call a Boom",
+      "description": "A surprising read on truck demand, foreign investment, and weak consumer sentiment all at once. This clip has a strong macro-contrarian angle.",
+      "hashtags": [
+        "economy",
+        "macro",
+        "truckdemand",
+        "kathywood",
+        "investing",
+        "sentiment"
+      ],
+      "layout_hint": "split_chart_person",
+      "selection_reason": "Composite 0.67 because it opens with a punchy boom claim, uses chart-driven evidence, and contrasts that with terrible sentiment for a strong tension arc.",
+      "rule_scores": [
+        {
+          "rule_id": "hook_strength",
+          "score": 0.82,
+          "reason": "Starts with the emphatic line that this is an outright boom."
+        },
+        {
+          "rule_id": "counterintuitive_claim",
+          "score": 0.84,
+          "reason": "Says the economy is booming in a pocket while sentiment remains terrible."
+        },
+        {
+          "rule_id": "chart_reference",
+          "score": 0.85,
+          "reason": "Anchored to the flatbed truck demand and services charts."
+        },
+        {
+          "rule_id": "self_contained",
+          "score": 0.68,
+          "reason": "The clip is understandable but references adjacent chart context."
+        },
+        {
+          "rule_id": "named_entity",
+          "score": 0.35,
+          "reason": "Includes Piper Sandler and University of Michigan references."
+        }
+      ],
+      "needs_review": false,
+      "review_reason": "",
+      "keep_ranges_sec": []
+    },
+    {
+      "clip_id": "004",
+      "topic": "Productivity above 3",
+      "start_time_sec": 1452.5,
+      "end_time_sec": 1543.0,
+      "viral_hook": "So here we ask the question will non-farm productivity increase above 3% in any quarter",
+      "virality_score": 0.744,
+      "transcript": "So here we ask the question will non-farm productivity increase above 3% in any quarter This is on a year-over-year basis in any quarter in 26 And you can see there's a 42% probability Well we think the probability actually is much higher than that And it's actually for a statistical reason If you look at productivity today you can see we're at roughly 2.5% And you can also see again if you look across this chart this is in the higher half of the history of this chart So pretty strong And as we have said in the know many times we've been in a rolling recession and this is what has happened That's so interesting Housing has been down and out Manufacturing has been down and out Small business down and out Consumers have been in a funk as measured by sentiment And productivity is at 2.5% So we believe that these technologies are already having an impact on productivity And we think in the first quarter when the numbers are reported and they'll be revised two times I think But when the first quarter number is reported if it is up at all on a quarter to quarter basis",
+      "suggested_overlay_title": "Productivity Surprise Coming",
+      "layout": null,
+      "hook_start_sec": 0.0,
+      "hook_end_sec": 6.5,
+      "trim_start_sec": 0.0,
+      "trim_end_sec": 0.0,
+      "shorts_title": "Why Kathy Wood Thinks Productivity Could Surprise Everyone in 2026",
+      "description": "Kathy Wood argues that productivity is already stronger than most people realize and could break above 3% even in a weak-feeling economy.",
+      "hashtags": [
+        "productivity",
+        "ai",
+        "economy",
+        "kathywood",
+        "macro",
+        "innovation"
+      ],
+      "layout_hint": "split_chart_person",
+      "selection_reason": "Composite 0.65 because it presents a measurable forecast, a low market-implied probability, and a clear contrarian explanation supported by charts.",
+      "rule_scores": [
+        {
+          "rule_id": "hook_strength",
+          "score": 0.72,
+          "reason": "Begins with a precise question and an eye-catching 3% threshold."
+        },
+        {
+          "rule_id": "counterintuitive_claim",
+          "score": 0.82,
+          "reason": "Argues productivity is strong despite housing manufacturing and consumers being weak."
+        },
+        {
+          "rule_id": "chart_reference",
+          "score": 0.86,
+          "reason": "Directly tied to a productivity probability chart and historical productivity chart."
+        },
+        {
+          "rule_id": "self_contained",
+          "score": 0.7,
+          "reason": "A viewer can grasp the forecast and rationale without prior context."
+        },
+        {
+          "rule_id": "named_entity",
+          "score": 0.1,
+          "reason": "No major person company or institution is central to the point."
+        }
+      ],
+      "needs_review": false,
+      "review_reason": "",
+      "keep_ranges_sec": []
+    },
+    {
+      "clip_id": "005",
+      "topic": "AI kills entry jobs",
+      "start_time_sec": 1640.6,
+      "end_time_sec": 1727.1,
+      "viral_hook": "In fact a lot of employment indicators suggest we're in a weak environment",
+      "virality_score": 0.741,
+      "transcript": "In fact a lot of employment indicators suggest we're in a weak environment And part of it is AI Entry-level jobs are not there for college graduates the way they have been in the past So unit labor costs this is underlying inflation 2.4% What's interesting about that is if you look at the TIPS market that's what the TIPS market says inflation is going to be in other words no real improvement from here If we're right and productivity starts scaling three and into next year four or five percent this unit labor cost growth rate will come down and underlying inflation will come down Here are some other reasons inflation is coming down Again very different from post-COVID when we had that supply shock and many people are saying we're in another supply shock and we are when it comes to oil for sure but we are not in a broad-based supply shock like we were after COVID Nothing like it In fact quite the opposite in housing Housing inflation is nil for existing home prices and still negative for new home prices",
+      "suggested_overlay_title": "AI Hits New Grads",
+      "layout": null,
+      "hook_start_sec": 0.0,
+      "hook_end_sec": 6.7,
+      "trim_start_sec": 0.0,
+      "trim_end_sec": 0.0,
+      "shorts_title": "Kathy Wood: AI Is Already Hurting Entry-Level Jobs",
+      "description": "Kathy Wood connects weak employment data, disappearing entry-level roles, and falling inflation pressure in one sharp macro take.",
+      "hashtags": [
+        "ai",
+        "jobs",
+        "inflation",
+        "kathywood",
+        "productivity",
+        "economy"
+      ],
+      "layout_hint": "split_chart_person",
+      "selection_reason": "Composite 0.68 because the AI-and-jobs claim is immediate and emotionally sticky, while the rest of the segment builds a complete inflation thesis around it.",
+      "rule_scores": [
+        {
+          "rule_id": "hook_strength",
+          "score": 0.84,
+          "reason": "Opens with a stark labor-market warning and quickly ties it to AI."
+        },
+        {
+          "rule_id": "counterintuitive_claim",
+          "score": 0.8,
+          "reason": "Claims AI is already removing entry-level jobs while also helping reduce inflation."
+        },
+        {
+          "rule_id": "chart_reference",
+          "score": 0.62,
+          "reason": "The segment references unit labor costs housing inflation and TIPS-linked visuals."
+        },
+        {
+          "rule_id": "self_contained",
+          "score": 0.75,
+          "reason": "The argument mostly stands alone though it moves across several related metrics."
+        },
+        {
+          "rule_id": "named_entity",
+          "score": 0.25,
+          "reason": "Mentions TIPS and COVID but no strong person or company focus."
+        }
+      ],
+      "needs_review": false,
+      "review_reason": "",
+      "keep_ranges_sec": []
+    },
+    {
+      "clip_id": "006",
+      "topic": "Producer prices squeeze",
+      "start_time_sec": 1801.4,
+      "end_time_sec": 1889.2,
+      "viral_hook": "is the Cal-She betting on that",
+      "virality_score": 0.7265,
+      "transcript": "is the Cal-She betting on that This is the PPI year-over-year percent change minus the CPI year-over-year percent change Is it going to be is the PPI inflation rate going to be above the CPI inflation rate for three consecutive months in 2026 So you can see here that the market is pretty sure that producer price inflation is going to surpass consumer price inflation on a year-over-year basis for three consecutive months this year Now that's very interesting Now what is this saying Well you can see it started out closer to 25 or 20 percent probability moved to 30 as the initial stages of the war in Iran took off And then everyone thought it was going to be over quickly settled back and you can see what has happened since This is more extended than many observers predicted And so that's where there's certainty so far as you can see on the next chart What's interesting about this is we already have two months where the PPI inflation rate has surpassed the CPI inflation rate two consecutive months",
+      "suggested_overlay_title": "PPI Beats CPI",
+      "layout": null,
+      "hook_start_sec": 0.0,
+      "hook_end_sec": 3.8,
+      "trim_start_sec": 0.0,
+      "trim_end_sec": 0.0,
+      "shorts_title": "What Kalshi Is Signaling About Producer Prices and Inflation",
+      "description": "A chart-heavy breakdown of why producer prices may keep running hotter than consumer prices and what that could mean for markets.",
+      "hashtags": [
+        "ppi",
+        "cpi",
+        "inflation",
+        "kalshi",
+        "macro",
+        "iran"
+      ],
+      "layout_hint": "split_chart_person",
+      "selection_reason": "Composite 0.63 because it has a clear event-market setup, a visible chart, and a useful inflation implication even if the hook is slightly less natural.",
+      "rule_scores": [
+        {
+          "rule_id": "hook_strength",
+          "score": 0.66,
+          "reason": "The opening is a direct setup into a market bet on inflation spreads."
+        },
+        {
+          "rule_id": "counterintuitive_claim",
+          "score": 0.74,
+          "reason": "Suggests producer inflation can stay above consumer inflation for months."
+        },
+        {
+          "rule_id": "chart_reference",
+          "score": 0.92,
+          "reason": "The entire segment is explicitly tied to a Kalshi inflation chart."
+        },
+        {
+          "rule_id": "self_contained",
+          "score": 0.7,
+          "reason": "A cold viewer can follow the inflation spread premise."
+        },
+        {
+          "rule_id": "named_entity",
+          "score": 0.35,
+          "reason": "Mentions Kalshi and Iran but no stronger entity-driven angle."
+        }
+      ],
+      "needs_review": false,
+      "review_reason": "",
+      "keep_ranges_sec": []
+    },
+    {
+      "clip_id": "007",
+      "topic": "Prediction markets boom",
+      "start_time_sec": 226.7,
+      "end_time_sec": 313.1,
+      "viral_hook": "prediction markets really represent the purest form of risk out there because",
+      "virality_score": 0.7055,
+      "transcript": "prediction markets really represent the purest form of risk out there because as you point out Cathy you can go directly to the underlying discrete event that then moves the on an equity And so I actually think of these tools as almost the inverse of derivatives right It's the underlying catalyst that will drive the performance of a stock up or down And so whereas you may want to hedge out some of that risk using a put call spread or many other forms of hedging now you have direct access to those underlying events business KPIs macroeconomic events where you don't need to take on the extra risk that is associated with the market right If you don't want to be exposed to what is happening in Iran well you don't need to take on that exposure through derivatives which are going to inherently have some of that in it You can go directly to the underlying event So I think it's a really amazing opportunity for the financial markets when we've started doing this research And I'll give a sneak preview I think you know in the medium term So over the next few years we believe that this market could explode up to five trillion dollars in notional volume Now right now Cal she is on an annualized run rate to do around one hundred and twenty one hundred and thirty billion dollars in notional volume for this year So we're talking about a massive explosion of where this total market is headed",
+      "suggested_overlay_title": "Purest Form Of Risk",
+      "layout": null,
+      "hook_start_sec": 0.0,
+      "hook_end_sec": 4.2,
+      "trim_start_sec": 0.0,
+      "trim_end_sec": 0.0,
+      "shorts_title": "Why Kathy Wood Thinks Prediction Markets Could Explode to $5 Trillion",
+      "description": "Nick explains why prediction markets may be the purest way to express risk and why ARK thinks the market could grow massively from here.",
+      "hashtags": [
+        "predictionmarkets",
+        "kalshi",
+        "arkinvest",
+        "finance",
+        "derivatives",
+        "investing"
+      ],
+      "layout_hint": "sit_center",
+      "selection_reason": "Composite 0.77 because it opens with a strong contrarian framing, names concrete market size numbers, and stands alone as a clear thesis clip.",
+      "rule_scores": [
+        {
+          "rule_id": "hook_strength",
+          "score": 0.86,
+          "reason": "Opens with a bold claim that prediction markets are the purest form of risk."
+        },
+        {
+          "rule_id": "counterintuitive_claim",
+          "score": 0.9,
+          "reason": "Frames prediction markets as the inverse of derivatives and a cleaner tool than standard hedges."
+        },
+        {
+          "rule_id": "chart_reference",
+          "score": 0.0,
+          "reason": "This segment is conceptual and does not rely on a visible chart."
+        },
+        {
+          "rule_id": "self_contained",
+          "score": 0.95,
+          "reason": "A cold viewer can follow the argument without prior setup."
+        },
+        {
+          "rule_id": "named_entity",
+          "score": 0.7,
+          "reason": "Names Cathy and Kalshi directly in the discussion."
+        }
+      ],
+      "needs_review": false,
+      "review_reason": "",
+      "keep_ranges_sec": []
+    }
+  ]
+}

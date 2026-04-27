@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+pip-wheel-metadata/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.pytest-tmp/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.coverage
+htmlcov/
+.uv-cache/
+pytest-cache-files-*/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Runtime artefacts (keep repo source-only; share MP4s via YouTube or GitHub Releases)
+output/
+output_*/
+keyframes/
+*.mp4
+*.wav
+*.srt
+*.json.tmp
+.afterform_work/
+.afterform_work_clean_*/
+.afterform_runs/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+competitors_code

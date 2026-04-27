@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "transcript_sha256": "f7f2199ad7419b7bdc7e62ecba37900cdfe805b57ab712f7848dc1adc432d492",
+  "clips_sha256": "284694973facc3dadce08c4e30e4a41df520ae235b8948bea38ce7f05dc37578",
+  "llm": {
+    "provider": "azure",
+    "model": "gpt-5.4",
+    "base_url": "https://lema-mb11yuk1-eastus2.services.ai.azure.com/openai/v1"
+  }
+}

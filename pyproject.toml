@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "afterform"
+version = "0.1.0"
+description = "Media transformation platform with reusable primitives and explicit flows"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "yt-dlp>=2024.0",
+    "openai>=1.0",
+    "google-genai>=1.0",
+    "jinja2>=3.1",
+    "mcp[cli]>=1.2.0",
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+    "scenedetect>=0.6",
+    "tqdm>=4.60",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest-asyncio>=0.23",
+    "Pillow>=10.0",
+    "pytest",
+    "ruff",
+]
+whisper = [
+    "whisperx @ git+https://github.com/m-bain/whisperX.git",
+]
+transcribe = [
+    "faster-whisper>=1.0",
+]
+face = [
+    "mediapipe>=0.10",
+]
+vision = [
+    "Pillow>=10.0",
+]
+
+[project.scripts]
+afterform = "afterform.cli:main"
+afterform-mcp = "afterform.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+afterform = ["flows/long_to_shorts/prompts/*.jinja2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -1,0 +1,13 @@
+{
+  "version": 3,
+  "transcript_sha256": "f7f2199ad7419b7bdc7e62ecba37900cdfe805b57ab712f7848dc1adc432d492",
+  "clips_sha256": "b0c9a3cc32673d8dba60d18c0af98e0f68576ebee6f654cc348852d532366571",
+  "audio_sha256": "ebe2cf53720ed907c944eefba53570c543aa6ab305870c3c436f8f58735166fd",
+  "llm": {
+    "provider": "azure",
+    "model": "gpt-5.4",
+    "base_url": "https://lema-mb11yuk1-eastus2.services.ai.azure.com/openai/v1"
+  },
+  "prune_level": "balanced",
+  "audio_policy_version": 1
+}
