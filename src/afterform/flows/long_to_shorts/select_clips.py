@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Callable, TypeVar
@@ -57,7 +58,7 @@ DEFAULT_CANDIDATE_TEMPERATURE = 0.7
 # Operator-visible ranking contract. If these weights change, the kept set
 # can change even when Gemini returns the same raw candidate pool, so the
 # clip-selection cache must stop trusting the old `clips.json`.
-CLIP_SELECTION_POLICY_VERSION = 1
+CLIP_SELECTION_POLICY_VERSION = 2
 CLIP_SELECTION_RULE_WEIGHTS: dict[str, float] = {
     "hook_strength": 0.30,
     "counterintuitive_claim": 0.30,
@@ -65,6 +66,15 @@ CLIP_SELECTION_RULE_WEIGHTS: dict[str, float] = {
     "self_contained": 0.15,
     "named_entity": 0.05,
 }
+
+_BOUNDARY_EPS_SEC = 0.05
+_IMMEDIATE_CONTINUATION_GAP_SEC = 0.35
+_DANGLING_CONTINUATION_GAP_SEC = 1.25
+_MAX_BOUNDARY_EXTENSION_SEC = 30.0
+_DANGLING_END_RE = re.compile(
+    r"(?:[,;:]|--|-|\b(?:and|because|but|for|if|of|or|so|that|the|to|when|where|which|while|with))$",
+    re.IGNORECASE,
+)
 
 
 class _ClipSelectionCandidate(BaseModel):
@@ -178,6 +188,120 @@ def _candidate_to_clip(candidate: _ClipSelectionCandidate) -> Clip:
     payload["virality_score"] = final_score
     payload["selection_reason"] = selection_reason
     return Clip.model_validate(payload)
+
+
+def _normalised_segments(transcript: dict) -> list[dict[str, float | str]]:
+    segments: list[dict[str, float | str]] = []
+    for seg in transcript.get("segments", []):
+        try:
+            start = float(seg.get("start", 0.0))
+            end = float(seg.get("end", start))
+        except (TypeError, ValueError):
+            continue
+        text = str(seg.get("text") or "").strip()
+        if end <= start or not text:
+            continue
+        segments.append({"start": start, "end": end, "text": text})
+    return sorted(segments, key=lambda item: float(item["start"]))
+
+
+def _segment_idx_at_end(
+    segments: list[dict[str, float | str]], end_time_sec: float
+) -> int | None:
+    candidate: int | None = None
+    for idx, seg in enumerate(segments):
+        start = float(seg["start"])
+        end = float(seg["end"])
+        if end_time_sec + _BOUNDARY_EPS_SEC < start:
+            break
+        if start - _BOUNDARY_EPS_SEC <= end_time_sec <= end + _BOUNDARY_EPS_SEC:
+            return idx
+        if end <= end_time_sec + _BOUNDARY_EPS_SEC:
+            candidate = idx
+    return candidate
+
+
+def _is_dangling_boundary(text: str) -> bool:
+    cleaned = text.strip().rstrip("\"')")
+    if not cleaned:
+        return False
+    if _DANGLING_END_RE.search(cleaned):
+        return True
+    return cleaned[-1] not in ".?!"
+
+
+def _clip_transcript_for_window(
+    segments: list[dict[str, float | str]], start_time_sec: float, end_time_sec: float
+) -> str:
+    texts = [
+        str(seg["text"]).strip()
+        for seg in segments
+        if float(seg["end"]) > start_time_sec and float(seg["start"]) < end_time_sec
+    ]
+    return " ".join(text for text in texts if text)
+
+
+def _complete_clip_boundary(
+    clip: Clip, segments: list[dict[str, float | str]]
+) -> Clip:
+    idx = _segment_idx_at_end(segments, clip.end_time_sec)
+    if idx is None:
+        return clip
+
+    original_end = float(clip.end_time_sec)
+    end = original_end
+    current = segments[idx]
+    if end < float(current["end"]) - _BOUNDARY_EPS_SEC:
+        end = float(current["end"])
+
+    while idx + 1 < len(segments):
+        current_text = str(segments[idx]["text"])
+        next_seg = segments[idx + 1]
+        gap = float(next_seg["start"]) - end
+        max_gap = (
+            _DANGLING_CONTINUATION_GAP_SEC
+            if _is_dangling_boundary(current_text)
+            else _IMMEDIATE_CONTINUATION_GAP_SEC
+        )
+        if gap > max_gap:
+            break
+        if float(next_seg["end"]) - original_end > _MAX_BOUNDARY_EXTENSION_SEC:
+            break
+        end = max(end, float(next_seg["end"]))
+        idx += 1
+        if not _is_dangling_boundary(str(next_seg["text"])):
+            next_gap = (
+                float(segments[idx + 1]["start"]) - end
+                if idx + 1 < len(segments)
+                else float("inf")
+            )
+            if next_gap > _IMMEDIATE_CONTINUATION_GAP_SEC:
+                break
+
+    if end <= original_end + _BOUNDARY_EPS_SEC:
+        return clip
+
+    transcript = _clip_transcript_for_window(segments, clip.start_time_sec, end)
+    logger.info(
+        "Clip %s: extended end %.2fs -> %.2fs to finish transcript boundary.",
+        clip.clip_id,
+        original_end,
+        end,
+    )
+    return clip.model_copy(update={"end_time_sec": end, "transcript": transcript})
+
+
+def complete_clip_boundaries(clips: list[Clip], transcript: dict) -> list[Clip]:
+    """Extend selected clip ends to finish the active sentence or point.
+
+    The LLM still picks the interesting window. This deterministic pass repairs
+    unsafe endpoints where the speaker is visibly continuing, and it may exceed
+    ``MAX_CLIP_DURATION_SEC`` when that is required to avoid cutting a sentence.
+    """
+    segments = _normalised_segments(transcript)
+    if not segments:
+        return clips
+    return [_complete_clip_boundary(clip, segments) for clip in clips]
 
 
 def rank_and_filter_clips(
@@ -310,7 +434,7 @@ def select_clips(
         return raw, parsed
 
     raw, parsed = _retry_llm("Clip selection", _call)
-    candidates = _parse_clips(raw, parsed=parsed)
+    candidates = complete_clip_boundaries(_parse_clips(raw, parsed=parsed), transcript)
     # The ranker can only backfill from the pool the model returned. If it
     # under-delivered (e.g. returned 2 of a requested 12), the min_kept floor
     # is unenforceable -- warn loudly so we do not silently ship fewer shorts
@@ -375,14 +499,19 @@ def _parse_clips(
     return clips
 
 
-def load_candidate_pool_from_raw_response(raw_json: str) -> list[Clip]:
+def load_candidate_pool_from_raw_response(
+    raw_json: str, *, transcript: dict | None = None
+) -> list[Clip]:
     """Parse the cached raw LLM response into a candidate pool.
 
     This is used when transcript/model inputs still match but the ranking
     policy changed; re-ranking the cached pool is much cheaper than another
     LLM call.
     """
-    return _parse_clips(raw_json)
+    clips = _parse_clips(raw_json)
+    if transcript is not None:
+        return complete_clip_boundaries(clips, transcript)
+    return clips
 
 
 def save_clips(clips: list[Clip], output_path: Path) -> Path:

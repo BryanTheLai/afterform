@@ -166,10 +166,10 @@ def _run_clip_selection_stage(config: PipelineConfig, state: PipelineState) -> P
             raise RuntimeError(
                 "clips.meta.json says re-rank is possible, but clip_selection_raw.json is missing."
             )
-        candidates = load_candidate_pool_from_raw_response(raw)
+        candidates = load_candidate_pool_from_raw_response(raw, transcript=state.transcript)
         clips = rank_and_filter_clips(
             candidates,
-            quality_threshold=config.clip_selection_quality_threshold,
+            threshold=config.clip_selection_quality_threshold,
             min_kept=config.clip_selection_min_kept,
             max_kept=config.clip_selection_max_kept,
         )
