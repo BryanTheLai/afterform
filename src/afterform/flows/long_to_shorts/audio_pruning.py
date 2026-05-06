@@ -81,6 +81,9 @@ def _looks_like_default_hook(hook_start: float | None, hook_end: float | None) -
 def compute_audio_keep_ranges(
     audio: AudioBuffer,
     clip: Clip,
+    *,
+    filled_pause_enabled: bool = False,
+    require_filled_pause: bool = False,
 ) -> AudioKeepResult:
     outer_start = max(0.0, min(clip.duration_sec, clip.trim_start_sec))
     outer_end = max(outer_start, min(clip.duration_sec, clip.duration_sec - clip.trim_end_sec))
@@ -106,9 +109,18 @@ def compute_audio_keep_ranges(
     speech_ranges, vad_backend, vad_warnings = detect_speech_ranges(
         clip_audio, audio.sample_rate
     )
-    filled_pause_ranges, fp_backend, fp_warnings = detect_filled_pause_ranges(
-        clip_audio, audio.sample_rate
-    )
+    if filled_pause_enabled:
+        filled_pause_ranges, fp_backend, fp_warnings = detect_filled_pause_ranges(
+            clip_audio, audio.sample_rate
+        )
+        if require_filled_pause and fp_backend == "none":
+            detail = " ".join(fp_warnings).strip()
+            raise RuntimeError(
+                "Filled-pause pruning required but unavailable."
+                + (f" {detail}" if detail else "")
+            )
+    else:
+        filled_pause_ranges, fp_backend, fp_warnings = [], "disabled", []
     protected_ranges = _protected_hook_ranges(clip, outer_start=outer_start, outer_end=outer_end)
     filled_pause_ranges = _subtract_protected_ranges(filled_pause_ranges, protected_ranges)
 

@@ -10,8 +10,8 @@ from afterform.schemas import Clip
 def test_clip_selection_rerank_reuses_raw_pool(tmp_path):
     transcript = {
         "segments": [
-            {"start": 0.0, "end": 55.0, "text": "A complete thought."},
-            {"start": 55.0, "end": 61.0, "text": "The next sentence completes."},
+            {"start": 0.0, "end": 55.0, "text": "A complete thought because"},
+            {"start": 55.0, "end": 61.0, "text": "the sentence completes."},
         ]
     }
     raw_response = json.dumps(

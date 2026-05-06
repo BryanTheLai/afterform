@@ -75,6 +75,11 @@ Cache layout:
 | `--llm-provider` | `AFTERFORM_LLM_PROVIDER` |
 | `--llm-model` | `AFTERFORM_LLM_MODEL` |
 | `--llm-vision-model` | `AFTERFORM_LLM_VISION_MODEL` |
+| `--clip-mode` | explicit CLI only |
+| `--clip-candidate-count` | explicit CLI only |
+| `--clip-quality-threshold` | explicit CLI only |
+| `--max-clips` | explicit CLI only |
+| `--review-only-clips` | explicit CLI only |
 | `--cache-root` | `AFTERFORM_CACHE_ROOT` |
 | `--work-dir` | explicit intermediate-artifact directory |
 | `--no-video-cache` | disables per-video cache dirs |

@@ -43,7 +43,9 @@ def test_title_text_injects_drawtext():
 def test_map_vout_and_primary_audio():
     cmd = build_ffmpeg_cmd(_req())
     assert "[vout]" in cmd
-    assert "0:a:0" in cmd
+    assert "[aout]" in cmd
+    fg = cmd[cmd.index("-filter_complex") + 1]
+    assert "[0:a:0]volume=8dB,alimiter=limit=0.95,aresample=44100[aout]" in fg
 
 
 def test_inner_keep_ranges_switch_to_concat_filtergraph():
@@ -59,7 +61,8 @@ def test_inner_keep_ranges_switch_to_concat_filtergraph():
     assert "trim=start=0.000:end=4.000" in fg
     assert "atrim=start=6.000:end=10.000" in fg
     assert "concat=n=2:v=1:a=1[vclip][aclip]" in fg
-    assert "[aclip]" in cmd
+    assert "[aclip]volume=8dB,alimiter=limit=0.95,aresample=44100[aout]" in fg
+    assert "[aout]" in cmd
 
 
 def test_subtitle_style_uses_requested_font_and_margin():

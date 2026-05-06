@@ -29,6 +29,8 @@ from afterform.flows.long_to_shorts.prune_content import (
     _build_user_message,
     _clamp_decision,
     _clips_fingerprint,
+    _complete_keep_range_tail,
+    _complete_trim_end_to_transcript_boundary,
     _looks_like_default_hook,
     _parse_decisions,
     _PruneDecision,
@@ -88,7 +90,14 @@ def cfg(tmp_path: Path) -> PipelineConfig:
 
 @pytest.fixture(autouse=True)
 def _stub_audio_keep_ranges(monkeypatch):
-    def _apply(clips, *, source_audio_path):
+    def _apply(
+        clips,
+        *,
+        source_audio_path,
+        transcript=None,
+        filled_pause_enabled=False,
+        require_filled_pause=False,
+    ):
         updated = []
         diagnostics = {}
         for clip in clips:
@@ -99,8 +108,12 @@ def _stub_audio_keep_ranges(monkeypatch):
                 )
             )
             diagnostics[clip.clip_id] = {
-                "audio_backend": {"speech": "stub", "filled_pause": "stub"},
+                "audio_backend": {
+                    "speech": "stub",
+                    "filled_pause": "stub" if filled_pause_enabled else "disabled",
+                },
                 "warnings": [],
+                "require_filled_pause": require_filled_pause,
             }
         return updated, diagnostics
 
@@ -390,9 +403,64 @@ def test_apply_decisions_with_transcript_performs_snap():
 
     # Without a transcript, trim_end stays at the LLM-requested 8.0.
     assert without_snap[0].trim_end_sec == pytest.approx(8.0, abs=0.05)
-    # With the transcript, snap to seg end 54.0 -> trim_end = 6.0 (forward
-    # within 2s tolerance).
-    assert with_snap[0].trim_end_sec == pytest.approx(6.0, abs=0.05)
+    # With the transcript, the cut first snaps to 54.0, then extends through
+    # the immediate continuation so the rendered clip does not stop early.
+    assert with_snap[0].trim_end_sec == pytest.approx(0.0, abs=0.05)
+
+
+def test_trim_end_completion_keeps_one_word_sentence_tail():
+    clip = Clip(
+        clip_id="002",
+        topic="worst case",
+        start_time_sec=432.9,
+        end_time_sec=515.989990234375,
+        trim_end_sec=0.54,
+    )
+    transcript = {
+        "segments": [
+            {
+                "start": 511.53,
+                "end": 515.4500122070312,
+                "text": "people factor in how valuable this learning is when they're doing their worst case scenario",
+            },
+            {"start": 515.4500122070312, "end": 515.989990234375, "text": "analysis."},
+            {
+                "start": 516.61,
+                "end": 519.49,
+                "text": "As a startup founder, you're responsible for making everything happen,",
+            },
+        ]
+    }
+
+    trim_end = _complete_trim_end_to_transcript_boundary(clip, transcript)
+
+    assert trim_end == pytest.approx(0.0, abs=0.01)
+
+
+def test_audio_keep_range_tail_completion_keeps_sentence_tail():
+    clip = Clip(
+        clip_id="002",
+        topic="worst case",
+        start_time_sec=432.9,
+        end_time_sec=515.989990234375,
+        keep_ranges_sec=[(75.65, 82.55)],
+    )
+    transcript = {
+        "segments": [
+            {
+                "start": 511.53,
+                "end": 515.4500122070312,
+                "text": "people factor in how valuable this learning is when they're doing their worst case scenario",
+            },
+            {"start": 515.4500122070312, "end": 515.989990234375, "text": "analysis."},
+        ]
+    }
+
+    completed = _complete_keep_range_tail(clip, transcript)
+
+    assert completed.keep_ranges_sec[-1][1] == pytest.approx(
+        clip.duration_sec, abs=0.01
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +642,8 @@ def test_run_stage_writes_artifacts_and_applies_trims(mock_call, cfg):
     meta = json.loads((cfg.work_dir / PRUNE_META_FILENAME).read_text())
     assert meta["prune_level"] == "balanced"
     assert meta["transcript_sha256"] == "fp-1"
+    assert meta["filled_pause_pruning"] is False
+    assert meta["require_filled_pause_pruning"] is False
 
 
 @patch("afterform.flows.long_to_shorts.prune_content.call_structured_llm")
@@ -614,6 +684,32 @@ def test_run_stage_cache_invalidates_on_level_change(mock_call, cfg):
         cfg2.work_dir, [clip], transcript, transcript_fp="fp", config=cfg2
     )
     assert mock_inst.call_count == 2
+
+
+@patch("afterform.flows.long_to_shorts.prune_content.call_structured_llm")
+def test_run_stage_cache_invalidates_on_filled_pause_flag_change(mock_call, cfg):
+    mock_inst = _mock_gemini_ok(mock_call, ts=3.0, te=2.0)
+
+    clip = _clip("001", end=200.0)
+    transcript = _transcript_for(100.0, 200.0)
+
+    run_content_pruning_stage(cfg.work_dir, [clip], transcript, transcript_fp="fp", config=cfg)
+    assert mock_inst.call_count == 1
+
+    cfg2 = PipelineConfig(
+        youtube_url=cfg.youtube_url,
+        work_dir=cfg.work_dir,
+        gemini_model=cfg.gemini_model,
+        prune_level=cfg.prune_level,
+        filled_pause_pruning=True,
+    )
+    run_content_pruning_stage(
+        cfg2.work_dir, [clip], transcript, transcript_fp="fp", config=cfg2
+    )
+    assert mock_inst.call_count == 2
+
+    artifact = json.loads((cfg.work_dir / PRUNE_ARTIFACT_FILENAME).read_text())
+    assert artifact["clips"][0]["diagnostics"]["audio_backend"]["filled_pause"] == "stub"
 
 
 @patch("afterform.flows.long_to_shorts.prune_content.call_structured_llm")

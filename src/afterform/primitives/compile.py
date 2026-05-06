@@ -17,7 +17,8 @@ Rendering order is fixed and intentional:
    to the output resolution so libass coordinate math (MarginV, FontSize)
    is in *output pixels*, not libass's default PlayResY=288 — which was
    the bug behind the "subtitles blocked / floating in the middle" look.
-4. **Mux** with the source audio stream (``0:a:0``).
+4. **Mux** with normalized source audio so quiet source uploads do not render
+   as effectively muted shorts.
 """
 
 from __future__ import annotations
@@ -84,6 +85,7 @@ _TITLE_LINE_SPACING_RATIO = 1.3
 # sync with the ``Fontname=Arial`` in the subtitle filter if it ever
 # changes.
 _TITLE_FONT_NAME = "Arial"
+_AUDIO_GAIN_FILTER = "volume=8dB,alimiter=limit=0.95,aresample=44100"
 
 
 def _title_char_px(size_px: int) -> float:
@@ -265,6 +267,11 @@ def build_ffmpeg_cmd(
         input_label=input_label,
     )
     fg = plan.filtergraph if not prefix else f"{prefix};{plan.filtergraph}"
+    normalized_audio_label: str | None = None
+    if include_audio:
+        audio_input = f"[{audio_label}]" if audio_label is not None else "[0:a:0]"
+        normalized_audio_label = "aout"
+        fg = f"{fg};{audio_input}{_AUDIO_GAIN_FILTER}[{normalized_audio_label}]"
 
     # Skip the drawtext title overlay on split layouts: the top band already
     # shows a slide/chart with its own baked-in title, so adding an overlay
@@ -335,7 +342,7 @@ def build_ffmpeg_cmd(
         cmd.extend(
             [
                 "-map",
-                f"[{audio_label}]" if audio_label is not None else "0:a:0",
+                f"[{normalized_audio_label}]",
                 "-c:a",
                 "aac",
                 "-b:a",

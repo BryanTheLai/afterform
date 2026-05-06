@@ -91,17 +91,26 @@ class PipelineConfig:
     prune_level: str = "balanced"
     # When True, re-run the pruning LLM even when prune.meta.json matches.
     force_content_pruning: bool = False
+    # Filled-pause pruning is opt-in because it requires optional audio models
+    # and can create bad micro-cuts if the detector is wrong.
+    filled_pause_pruning: bool = False
+    # When True, fail the run if filled-pause pruning was requested but the
+    # detector runtime is unavailable.
+    require_filled_pause_pruning: bool = False
 
     # Stage 2 - candidate over-generation. The selector now asks Gemini for a
     # pool of candidates (``clip_selection_candidate_count``), scores them,
     # and keeps the top ones that pass ``clip_selection_quality_threshold``.
-    # We always keep at least ``clip_selection_min_kept`` clips even when
-    # none pass the threshold, so rendering never blocks on a weak transcript.
+    # Curated mode keeps at least ``clip_selection_min_kept`` clips even when
+    # none pass the threshold. Exhaustive mode keeps every distinct clip above
+    # the threshold, does not weak-backfill by default, and treats ``None`` as
+    # no arbitrary final cap.
     # See ``src/afterform/flows/long_to_shorts/select_clips.py`` for the ranking logic.
+    clip_selection_mode: str = "curated"
     clip_selection_candidate_count: int = 12
     clip_selection_quality_threshold: float = 0.70
-    clip_selection_min_kept: int = 5
-    clip_selection_max_kept: int = 8
+    clip_selection_min_kept: int = 10
+    clip_selection_max_kept: int | None = 20
 
     # Subtitle rendering / cue shaping.
     # Values are in **output pixels** for a 1080x1920 short: libass is pinned to

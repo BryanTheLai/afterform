@@ -36,26 +36,35 @@ def transcript_fingerprint(transcript: dict) -> str:
 
 def clip_selection_policy(config: PipelineConfig) -> dict[str, Any]:
     """Return the cache-significant post-LLM ranking policy."""
+    max_kept = (
+        None
+        if config.clip_selection_max_kept is None
+        else int(config.clip_selection_max_kept)
+    )
     try:
         from afterform.flows.long_to_shorts.select_clips import (
+            CLIP_SELECTION_DEDUPE_POLICY_VERSION,
             CLIP_SELECTION_POLICY_VERSION,
             CLIP_SELECTION_RULE_WEIGHTS,
         )
     except Exception:
         return {
             "version": 0,
+            "mode": str(config.clip_selection_mode),
             "candidate_count": int(config.clip_selection_candidate_count),
             "quality_threshold": float(config.clip_selection_quality_threshold),
             "min_kept": int(config.clip_selection_min_kept),
-            "max_kept": int(config.clip_selection_max_kept),
+            "max_kept": max_kept,
         }
 
     return {
         "version": int(CLIP_SELECTION_POLICY_VERSION),
+        "mode": str(config.clip_selection_mode),
+        "dedupe_policy_version": int(CLIP_SELECTION_DEDUPE_POLICY_VERSION),
         "candidate_count": int(config.clip_selection_candidate_count),
         "quality_threshold": float(config.clip_selection_quality_threshold),
         "min_kept": int(config.clip_selection_min_kept),
-        "max_kept": int(config.clip_selection_max_kept),
+        "max_kept": max_kept,
         "rule_weights": dict(CLIP_SELECTION_RULE_WEIGHTS),
     }
 

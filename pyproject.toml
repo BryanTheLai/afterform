@@ -41,6 +41,10 @@ face = [
 vision = [
     "Pillow>=10.0",
 ]
+filled-pause = [
+    "torch>=2.0",
+    "transformers>=4.40",
+]
 
 [project.scripts]
 afterform = "afterform.cli:main"

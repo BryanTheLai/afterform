@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -54,11 +54,13 @@ DEFAULT_MAX_KEPT = 8
 # "the same five most-obvious clips every run". Still well below 1.0 so we
 # do not get word-salad IDs or timestamps.
 DEFAULT_CANDIDATE_TEMPERATURE = 0.7
+DEFAULT_SELECTION_MODE = "curated"
 
 # Operator-visible ranking contract. If these weights change, the kept set
 # can change even when Gemini returns the same raw candidate pool, so the
 # clip-selection cache must stop trusting the old `clips.json`.
-CLIP_SELECTION_POLICY_VERSION = 2
+CLIP_SELECTION_POLICY_VERSION = 4
+CLIP_SELECTION_DEDUPE_POLICY_VERSION = 1
 CLIP_SELECTION_RULE_WEIGHTS: dict[str, float] = {
     "hook_strength": 0.30,
     "counterintuitive_claim": 0.30,
@@ -75,6 +77,43 @@ _DANGLING_END_RE = re.compile(
     r"(?:[,;:]|--|-|\b(?:and|because|but|for|if|of|or|so|that|the|to|when|where|which|while|with))$",
     re.IGNORECASE,
 )
+_CONTINUATION_START_RE = re.compile(
+    r"^(?:and|because|but|so|that|then|therefore|this|these|those|it|they|which)\b",
+    re.IGNORECASE,
+)
+_CONTINUATION_STOPWORDS = {
+    "about",
+    "after",
+    "also",
+    "are",
+    "because",
+    "being",
+    "but",
+    "can",
+    "for",
+    "from",
+    "have",
+    "into",
+    "just",
+    "more",
+    "not",
+    "one",
+    "that",
+    "the",
+    "their",
+    "them",
+    "then",
+    "there",
+    "they",
+    "this",
+    "were",
+    "what",
+    "when",
+    "with",
+    "would",
+    "you",
+    "your",
+}
 
 
 class _ClipSelectionCandidate(BaseModel):
@@ -104,6 +143,13 @@ class _ClipSelectionCandidate(BaseModel):
 
 class ClipSelectionResponse(BaseModel):
     clips: list[_ClipSelectionCandidate] = Field(default_factory=list)
+
+
+class DedupeDecision(BaseModel):
+    kept_clip_id: str
+    dropped_clip_id: str
+    reason: str
+    score_delta: float
 
 
 def _retry_llm(name: str, fn: Callable[[], T], attempts: int = LLM_MAX_ATTEMPTS) -> T:
@@ -190,8 +236,8 @@ def _candidate_to_clip(candidate: _ClipSelectionCandidate) -> Clip:
     return Clip.model_validate(payload)
 
 
-def _normalised_segments(transcript: dict) -> list[dict[str, float | str]]:
-    segments: list[dict[str, float | str]] = []
+def _normalised_segments(transcript: dict) -> list[dict[str, Any]]:
+    segments: list[dict[str, Any]] = []
     for seg in transcript.get("segments", []):
         try:
             start = float(seg.get("start", 0.0))
@@ -201,12 +247,12 @@ def _normalised_segments(transcript: dict) -> list[dict[str, float | str]]:
         text = str(seg.get("text") or "").strip()
         if end <= start or not text:
             continue
-        segments.append({"start": start, "end": end, "text": text})
+        segments.append({"start": start, "end": end, "text": text, "words": seg.get("words") or []})
     return sorted(segments, key=lambda item: float(item["start"]))
 
 
 def _segment_idx_at_end(
-    segments: list[dict[str, float | str]], end_time_sec: float
+    segments: list[dict[str, Any]], end_time_sec: float
 ) -> int | None:
     candidate: int | None = None
     for idx, seg in enumerate(segments):
@@ -230,11 +276,88 @@ def _is_dangling_boundary(text: str) -> bool:
     return cleaned[-1] not in ".?!"
 
 
+def _meaningful_tokens(text: str) -> set[str]:
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return {token for token in tokens if len(token) > 2 and token not in _CONTINUATION_STOPWORDS}
+
+
+def _is_continuation_segment(current_text: str, next_text: str) -> bool:
+    cleaned_next = next_text.strip()
+    if _CONTINUATION_START_RE.match(cleaned_next):
+        return True
+    return len(_meaningful_tokens(current_text) & _meaningful_tokens(cleaned_next)) >= 2
+
+
+def _word_bounds(word: dict[str, Any]) -> tuple[float, float] | None:
+    try:
+        start = float(word.get("start", word.get("start_time", 0.0)))
+        end = float(word.get("end", word.get("end_time", start)))
+    except (TypeError, ValueError):
+        return None
+    if end < start:
+        return None
+    return start, end
+
+
+def _word_text(word: dict[str, Any]) -> str:
+    return str(word.get("word") or word.get("text") or "").strip()
+
+
+def _first_sentence_end_in_segment(seg: dict[str, Any], after_time_sec: float) -> float | None:
+    timed_words = []
+    for word in seg.get("words") or []:
+        if not isinstance(word, dict):
+            continue
+        bounds = _word_bounds(word)
+        if bounds is None:
+            continue
+        timed_words.append((word, bounds))
+
+    text_tokens = re.findall(r"\S+", str(seg.get("text") or ""))
+    if text_tokens and len(text_tokens) == len(timed_words):
+        first_idx = 0
+        for idx, (_word, (_start, end)) in enumerate(timed_words):
+            if end > after_time_sec + _BOUNDARY_EPS_SEC:
+                first_idx = idx
+                break
+        for idx in range(first_idx, len(text_tokens)):
+            token = text_tokens[idx].rstrip("\"')")
+            if token.endswith((".", "?", "!")):
+                return timed_words[idx][1][1]
+
+    for word, (_start, end) in timed_words:
+        if end <= after_time_sec + _BOUNDARY_EPS_SEC:
+            continue
+        token = _word_text(word).rstrip("\"')")
+        if token.endswith((".", "?", "!")):
+            return end
+    return None
+
+
+def _segment_text_for_window(seg: dict[str, Any], start_time_sec: float, end_time_sec: float) -> str:
+    words = []
+    for word in seg.get("words") or []:
+        if not isinstance(word, dict):
+            continue
+        bounds = _word_bounds(word)
+        if bounds is None:
+            continue
+        start, end = bounds
+        if end <= start_time_sec or start >= end_time_sec:
+            continue
+        text = _word_text(word)
+        if text:
+            words.append(text)
+    if words:
+        return " ".join(words)
+    return str(seg["text"]).strip()
+
+
 def _clip_transcript_for_window(
-    segments: list[dict[str, float | str]], start_time_sec: float, end_time_sec: float
+    segments: list[dict[str, Any]], start_time_sec: float, end_time_sec: float
 ) -> str:
     texts = [
-        str(seg["text"]).strip()
+        _segment_text_for_window(seg, start_time_sec, end_time_sec)
         for seg in segments
         if float(seg["end"]) > start_time_sec and float(seg["start"]) < end_time_sec
     ]
@@ -242,7 +365,7 @@ def _clip_transcript_for_window(
 
 
 def _complete_clip_boundary(
-    clip: Clip, segments: list[dict[str, float | str]]
+    clip: Clip, segments: list[dict[str, Any]]
 ) -> Clip:
     idx = _segment_idx_at_end(segments, clip.end_time_sec)
     if idx is None:
@@ -257,17 +380,26 @@ def _complete_clip_boundary(
     while idx + 1 < len(segments):
         current_text = str(segments[idx]["text"])
         next_seg = segments[idx + 1]
+        next_text = str(next_seg["text"])
         gap = float(next_seg["start"]) - end
+        current_is_dangling = _is_dangling_boundary(current_text)
         max_gap = (
             _DANGLING_CONTINUATION_GAP_SEC
-            if _is_dangling_boundary(current_text)
+            if current_is_dangling
             else _IMMEDIATE_CONTINUATION_GAP_SEC
         )
         if gap > max_gap:
             break
-        if float(next_seg["end"]) - original_end > _MAX_BOUNDARY_EXTENSION_SEC:
+        if not current_is_dangling and not _is_continuation_segment(current_text, next_text):
             break
-        end = max(end, float(next_seg["end"]))
+        sentence_end = _first_sentence_end_in_segment(next_seg, end)
+        next_end = float(next_seg["end"]) if sentence_end is None else sentence_end
+        over_extension_budget = next_end - original_end > _MAX_BOUNDARY_EXTENSION_SEC
+        if over_extension_budget and not current_is_dangling:
+            break
+        end = max(end, next_end)
+        if sentence_end is not None:
+            break
         idx += 1
         if not _is_dangling_boundary(str(next_seg["text"])):
             next_gap = (
@@ -304,12 +436,184 @@ def complete_clip_boundaries(clips: list[Clip], transcript: dict) -> list[Clip]:
     return [_complete_clip_boundary(clip, segments) for clip in clips]
 
 
+def _normalise_similarity_text(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", text.lower())).strip()
+
+
+def _token_set(text: str) -> set[str]:
+    return {token for token in _normalise_similarity_text(text).split() if token}
+
+
+def _jaccard(a: str, b: str) -> float:
+    a_tokens = _token_set(a)
+    b_tokens = _token_set(b)
+    if not a_tokens or not b_tokens:
+        return 0.0
+    return len(a_tokens & b_tokens) / len(a_tokens | b_tokens)
+
+
+def _time_iou(a: Clip, b: Clip) -> float:
+    overlap = max(0.0, min(a.end_time_sec, b.end_time_sec) - max(a.start_time_sec, b.start_time_sec))
+    union = max(a.end_time_sec, b.end_time_sec) - min(a.start_time_sec, b.start_time_sec)
+    if union <= 0.0:
+        return 0.0
+    return overlap / union
+
+
+def _contains_window(a: Clip, b: Clip) -> bool:
+    return (
+        a.start_time_sec <= b.start_time_sec + _BOUNDARY_EPS_SEC
+        and a.end_time_sec >= b.end_time_sec - _BOUNDARY_EPS_SEC
+    )
+
+
+def _duplicate_reason(candidate: Clip, kept: Clip) -> str | None:
+    if _time_iou(candidate, kept) >= 0.60:
+        return "time_overlap"
+    transcript_similarity = _jaccard(candidate.transcript or candidate.topic, kept.transcript or kept.topic)
+    if (_contains_window(candidate, kept) or _contains_window(kept, candidate)) and transcript_similarity >= 0.80:
+        return "contained_window"
+    if _jaccard(candidate.viral_hook, kept.viral_hook) >= 0.88:
+        return "hook_similarity"
+    if transcript_similarity >= 0.82:
+        return "text_similarity"
+    if candidate.topic and kept.topic and _jaccard(candidate.topic, kept.topic) >= 0.90:
+        return "topic_similarity"
+    return None
+
+
+def dedupe_clips(clips: list[Clip]) -> tuple[list[Clip], list[DedupeDecision]]:
+    """Drop redundant candidates while preserving the strongest representative."""
+    kept: list[Clip] = []
+    decisions: list[DedupeDecision] = []
+    ordered = sorted(clips, key=lambda c: (c.virality_score, -c.duration_sec), reverse=True)
+    for candidate in ordered:
+        duplicate_of: Clip | None = None
+        reason: str | None = None
+        for existing in kept:
+            reason = _duplicate_reason(candidate, existing)
+            if reason is not None:
+                duplicate_of = existing
+                break
+        if duplicate_of is None or reason is None:
+            kept.append(candidate)
+            continue
+        decisions.append(
+            DedupeDecision(
+                kept_clip_id=duplicate_of.clip_id,
+                dropped_clip_id=candidate.clip_id,
+                reason=reason,
+                score_delta=round(duplicate_of.virality_score - candidate.virality_score, 4),
+            )
+        )
+    return kept, decisions
+
+
+def save_dedupe_report(
+    output_path: Path,
+    *,
+    decisions: list[DedupeDecision],
+    candidate_count: int,
+    kept_count: int,
+    mode: str,
+) -> Path:
+    payload = {
+        "mode": mode,
+        "dedupe_policy_version": CLIP_SELECTION_DEDUPE_POLICY_VERSION,
+        "candidate_count": candidate_count,
+        "kept_count": kept_count,
+        "dropped_duplicate_count": len(decisions),
+        "decisions": [decision.model_dump() for decision in decisions],
+    }
+    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    logger.info("Saved clip-selection dedupe report to %s", output_path)
+    return output_path
+
+
+def filter_clip_candidates(
+    clips: list[Clip],
+    *,
+    threshold: float = DEFAULT_QUALITY_THRESHOLD,
+    min_kept: int = DEFAULT_MIN_KEPT,
+    max_kept: int | None = DEFAULT_MAX_KEPT,
+    mode: str = DEFAULT_SELECTION_MODE,
+) -> tuple[list[Clip], list[DedupeDecision]]:
+    if not clips:
+        return [], []
+
+    normalized_mode = mode.strip().lower()
+    if normalized_mode not in {"curated", "exhaustive"}:
+        raise ValueError("clip selection mode must be 'curated' or 'exhaustive'")
+
+    def _priority(c: Clip) -> tuple[float, float]:
+        review_penalty = 0.5 if c.needs_review else 0.0
+        return (c.virality_score - review_penalty, c.virality_score)
+
+    ordered = sorted(clips, key=_priority, reverse=True)
+
+    if normalized_mode == "exhaustive":
+        kept = [c for c in ordered if c.virality_score >= threshold and not c.needs_review]
+        kept, decisions = dedupe_clips(kept)
+    else:
+        strong = [c for c in ordered if c.virality_score >= threshold and not c.needs_review]
+        kept = list(strong)
+        if len(kept) < min_kept:
+            backfill = [c for c in ordered if c not in kept]
+            for c in backfill:
+                if len(kept) >= min_kept:
+                    break
+                kept.append(c)
+        decisions = []
+
+    if max_kept is not None and len(kept) > max_kept:
+        kept = kept[:max_kept]
+
+    renumbered: list[Clip] = []
+    id_map: dict[str, str] = {}
+    for i, c in enumerate(kept, start=1):
+        new_id = f"{i:03d}"
+        id_map[c.clip_id] = new_id
+        renumbered.append(c if c.clip_id == new_id else c.model_copy(update={"clip_id": new_id}))
+
+    remapped_decisions = [
+        decision.model_copy(
+            update={
+                "kept_clip_id": id_map.get(decision.kept_clip_id, decision.kept_clip_id),
+            }
+        )
+        for decision in decisions
+    ]
+
+    dropped = len(ordered) - len(kept)
+    max_label = "none" if max_kept is None else str(max_kept)
+    logger.info(
+        "Clip ranking: kept %d / %d candidates (mode=%s, threshold=%.2f, min=%d, max=%s, dropped=%d).",
+        len(renumbered),
+        len(ordered),
+        normalized_mode,
+        threshold,
+        min_kept,
+        max_label,
+        dropped,
+    )
+    for c in renumbered:
+        logger.info(
+            "  [%s] score=%.2f %s %s",
+            c.clip_id,
+            c.virality_score,
+            "(review)" if c.needs_review else "",
+            c.topic,
+        )
+    return renumbered, remapped_decisions
+
+
 def rank_and_filter_clips(
     clips: list[Clip],
     *,
     threshold: float = DEFAULT_QUALITY_THRESHOLD,
     min_kept: int = DEFAULT_MIN_KEPT,
-    max_kept: int = DEFAULT_MAX_KEPT,
+    max_kept: int | None = DEFAULT_MAX_KEPT,
+    mode: str = DEFAULT_SELECTION_MODE,
 ) -> list[Clip]:
     """Rank ``clips`` by ``virality_score`` and apply the threshold+floor+cap.
 
@@ -329,55 +633,14 @@ def rank_and_filter_clips(
     This is the "threshold with a floor" policy the user asked for: quality
     first, but never ship zero shorts when the transcript is weak.
     """
-    if not clips:
-        return []
-
-    def _priority(c: Clip) -> tuple[float, float]:
-        # needs_review clips fall behind same-score non-reviewed ones.
-        review_penalty = 0.5 if c.needs_review else 0.0
-        return (c.virality_score - review_penalty, c.virality_score)
-
-    ordered = sorted(clips, key=_priority, reverse=True)
-
-    strong = [c for c in ordered if c.virality_score >= threshold and not c.needs_review]
-    kept = list(strong)
-
-    if len(kept) < min_kept:
-        backfill = [c for c in ordered if c not in kept]
-        for c in backfill:
-            if len(kept) >= min_kept:
-                break
-            kept.append(c)
-
-    if len(kept) > max_kept:
-        kept = kept[:max_kept]
-
-    # Renumber clip_ids so consumers (filenames, layout vision, subtitles)
-    # always see 001..NNN in rank order regardless of what the LLM returned.
-    renumbered: list[Clip] = []
-    for i, c in enumerate(kept, start=1):
-        new_id = f"{i:03d}"
-        renumbered.append(c if c.clip_id == new_id else c.model_copy(update={"clip_id": new_id}))
-
-    dropped = len(ordered) - len(kept)
-    logger.info(
-        "Clip ranking: kept %d / %d candidates (threshold=%.2f, min=%d, max=%d, dropped=%d).",
-        len(renumbered),
-        len(ordered),
-        threshold,
-        min_kept,
-        max_kept,
-        dropped,
+    kept, _decisions = filter_clip_candidates(
+        clips,
+        threshold=threshold,
+        min_kept=min_kept,
+        max_kept=max_kept,
+        mode=mode,
     )
-    for c in renumbered:
-        logger.info(
-            "  [%s] score=%.2f %s %s",
-            c.clip_id,
-            c.virality_score,
-            "(review)" if c.needs_review else "",
-            c.topic,
-        )
-    return renumbered
+    return kept
 
 
 def select_clips(
@@ -388,8 +651,10 @@ def select_clips(
     candidate_count: int = DEFAULT_CANDIDATE_COUNT,
     quality_threshold: float = DEFAULT_QUALITY_THRESHOLD,
     min_kept: int = DEFAULT_MIN_KEPT,
-    max_kept: int = DEFAULT_MAX_KEPT,
+    max_kept: int | None = DEFAULT_MAX_KEPT,
     temperature: float = DEFAULT_CANDIDATE_TEMPERATURE,
+    selection_mode: str = DEFAULT_SELECTION_MODE,
+    dedupe_report_path: Path | None = None,
 ) -> tuple[list[Clip], str]:
     """
     Call the configured LLM to select clips. Returns ``(clips, raw_json)`` for caching / debugging.
@@ -456,12 +721,21 @@ def select_clips(
             candidate_count,
             min_kept,
         )
-    clips = rank_and_filter_clips(
+    clips, decisions = filter_clip_candidates(
         candidates,
         threshold=quality_threshold,
         min_kept=min_kept,
         max_kept=max_kept,
+        mode=selection_mode,
     )
+    if dedupe_report_path is not None:
+        save_dedupe_report(
+            dedupe_report_path,
+            decisions=decisions,
+            candidate_count=len(candidates),
+            kept_count=len(clips),
+            mode=selection_mode,
+        )
     return clips, raw
 
 

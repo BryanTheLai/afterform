@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from math import ceil
 from pathlib import Path
 
@@ -21,6 +22,23 @@ OPENAI_TARGET_UPLOAD_BYTES = 20 * 1024 * 1024
 OPENAI_MIN_CHUNK_SEC = 300.0
 
 
+def _has_audio_stream(media_path: Path) -> bool:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "csv=p=0",
+        str(media_path),
+    ]
+    out = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    return out.returncode == 0 and "audio" in (out.stdout or "").lower()
+
+
 def download_video(youtube_url: str, output_dir: Path) -> Path:
     """
     Download the best quality video+audio from YouTube.
@@ -29,8 +47,11 @@ def download_video(youtube_url: str, output_dir: Path) -> Path:
     """
     output_template = str(output_dir / "source.%(ext)s")
     cmd = [
-        "yt-dlp",
-        "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        sys.executable,
+        "-m",
+        "yt_dlp",
+        "--format",
+        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4][acodec!=none]/best[acodec!=none]",
         "--merge-output-format", "mp4",
         "--output", output_template,
         "--no-playlist",
@@ -55,6 +76,11 @@ def download_video(youtube_url: str, output_dir: Path) -> Path:
             raise FileNotFoundError(f"Download failed - no output found in {output_dir}")
 
     logger.info("Downloaded to: %s", video_path)
+    if not _has_audio_stream(video_path):
+        raise RuntimeError(
+            "Downloaded source has no audio stream. "
+            "The downloader must select an audio-bearing format before rendering."
+        )
     return video_path
 
 

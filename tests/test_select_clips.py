@@ -134,3 +134,95 @@ def test_complete_clip_boundaries_allows_max_duration_overrun_to_finish_sentence
 
     assert completed.duration_sec == 96.0
 
+
+def test_complete_clip_boundaries_ignores_extension_budget_when_tail_is_dangling():
+    clip = Clip(
+        clip_id="001",
+        topic="long dangling point",
+        start_time_sec=0.0,
+        end_time_sec=30.0,
+        transcript="I also",
+        virality_score=0.9,
+    )
+    transcript = {
+        "segments": [
+            {"start": 29.0, "end": 30.0, "text": "I also"},
+            {
+                "start": 30.0,
+                "end": 65.0,
+                "text": "think this sentence needs more than the old extension budget to finish.",
+            },
+        ]
+    }
+
+    [completed] = complete_clip_boundaries([clip], transcript)
+
+    assert completed.end_time_sec == 65.0
+
+
+def test_complete_clip_boundaries_does_not_extend_clean_unrelated_sentence():
+    clip = Clip(
+        clip_id="001",
+        topic="motivation",
+        start_time_sec=263.8,
+        end_time_sec=337.9,
+        transcript="Over time though, I've decided that this also doesn't matter as much as I had thought.",
+        virality_score=0.9,
+    )
+    transcript = {
+        "segments": [
+            {
+                "start": 333.0,
+                "end": 337.9,
+                "text": "Over time though, I've decided that this also doesn't matter as much as I had thought.",
+            },
+            {
+                "start": 338.0,
+                "end": 343.6,
+                "text": "I think there are many perfectly legitimate motivations to start a company.",
+            },
+        ]
+    }
+
+    [completed] = complete_clip_boundaries([clip], transcript)
+
+    assert completed.end_time_sec == 337.9
+
+
+def test_complete_clip_boundaries_stops_at_word_level_sentence_end():
+    clip = Clip(
+        clip_id="001",
+        topic="motivation",
+        start_time_sec=263.8,
+        end_time_sec=337.9,
+        transcript="I've decided",
+        virality_score=0.9,
+    )
+    transcript = {
+        "segments": [
+            {"start": 332.9, "end": 337.9, "text": "Over time though, I've decided"},
+            {
+                "start": 338.0,
+                "end": 343.6,
+                "text": "that this also doesn't matter as much as I had thought. I think there are many perfectly",
+                "words": [
+                    {"word": "that", "start": 338.0, "end": 338.2},
+                    {"word": "this", "start": 338.2, "end": 338.4},
+                    {"word": "thought.", "start": 341.8, "end": 342.1},
+                    {"word": "I", "start": 342.2, "end": 342.3},
+                    {"word": "think", "start": 342.3, "end": 342.6},
+                ],
+            },
+            {
+                "start": 343.7,
+                "end": 348.7,
+                "text": "legitimate motivations to start a company.",
+            },
+        ]
+    }
+
+    [completed] = complete_clip_boundaries([clip], transcript)
+
+    assert completed.end_time_sec == 342.1
+    assert completed.transcript.endswith("thought.")
+

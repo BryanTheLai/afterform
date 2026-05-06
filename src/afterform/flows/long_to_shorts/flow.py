@@ -17,9 +17,10 @@ from afterform.flows.long_to_shorts.clip_selection_cache import (
     write_artifacts,
 )
 from afterform.flows.long_to_shorts.select_clips import (
+    filter_clip_candidates,
     load_candidate_pool_from_raw_response,
     load_clips,
-    rank_and_filter_clips,
+    save_dedupe_report,
     save_clips,
     select_clips,
 )
@@ -137,6 +138,7 @@ def _run_clip_selection_stage(config: PipelineConfig, state: PipelineState) -> P
     assert state.transcript_fp is not None
 
     clips_path = config.work_dir / "clips.json"
+    dedupe_report_path = config.work_dir / "clip_selection_dedupe.json"
     fp = state.transcript_fp
     meta = load_meta(config.work_dir)
 
@@ -167,11 +169,19 @@ def _run_clip_selection_stage(config: PipelineConfig, state: PipelineState) -> P
                 "clips.meta.json says re-rank is possible, but clip_selection_raw.json is missing."
             )
         candidates = load_candidate_pool_from_raw_response(raw, transcript=state.transcript)
-        clips = rank_and_filter_clips(
+        clips, decisions = filter_clip_candidates(
             candidates,
             threshold=config.clip_selection_quality_threshold,
             min_kept=config.clip_selection_min_kept,
             max_kept=config.clip_selection_max_kept,
+            mode=config.clip_selection_mode,
+        )
+        save_dedupe_report(
+            dedupe_report_path,
+            decisions=decisions,
+            candidate_count=len(candidates),
+            kept_count=len(clips),
+            mode=config.clip_selection_mode,
         )
         save_clips(clips, clips_path)
         write_artifacts(
@@ -190,6 +200,8 @@ def _run_clip_selection_stage(config: PipelineConfig, state: PipelineState) -> P
             quality_threshold=config.clip_selection_quality_threshold,
             min_kept=config.clip_selection_min_kept,
             max_kept=config.clip_selection_max_kept,
+            selection_mode=config.clip_selection_mode,
+            dedupe_report_path=dedupe_report_path,
         )
         save_clips(clips, clips_path)
         write_artifacts(

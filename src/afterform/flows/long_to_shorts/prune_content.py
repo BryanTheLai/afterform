@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field, ValidationError
 from afterform.schemas import Clip
 
 from afterform.flows.long_to_shorts.audio_pruning import compute_audio_keep_ranges, load_audio_buffer
+from afterform.flows.long_to_shorts.select_clips import complete_clip_boundaries
 from afterform.config import (
     MAX_CLIP_DURATION_SEC,
     MIN_CLIP_DURATION_SEC,
@@ -59,7 +60,7 @@ PRUNE_META_VERSION = 3
 PRUNE_META_FILENAME = "prune.meta.json"
 PRUNE_RAW_FILENAME = "prune_raw.json"
 PRUNE_ARTIFACT_FILENAME = "prune.json"
-_AUDIO_POLICY_VERSION = 1
+_AUDIO_POLICY_VERSION = 2
 
 LLM_MAX_ATTEMPTS = 3
 LLM_RETRY_DELAY_SEC = 2.0
@@ -388,6 +389,12 @@ def apply_prune_decisions(
             snapped_ts, snapped_te = _snap_trims_to_segment_boundaries(
                 candidate, transcript, level=level
             )
+            snapped_te = _complete_trim_end_to_transcript_boundary(
+                candidate.model_copy(
+                    update={"trim_start_sec": snapped_ts, "trim_end_sec": snapped_te}
+                ),
+                transcript,
+            )
             if abs(snapped_ts - ts) > 1e-3 or abs(snapped_te - te) > 1e-3:
                 logger.info(
                     "Clip %s: prune boundaries snapped to segment edges "
@@ -409,6 +416,9 @@ def apply_audio_keep_ranges(
     clips: list[Clip],
     *,
     source_audio_path: Path,
+    transcript: dict | None = None,
+    filled_pause_enabled: bool = False,
+    require_filled_pause: bool = False,
 ) -> tuple[list[Clip], dict[str, dict[str, Any]]]:
     """Compute audio-first keep ranges for each clip from the shared WAV."""
     if not source_audio_path.is_file():
@@ -442,10 +452,16 @@ def apply_audio_keep_ranges(
     updated: list[Clip] = []
     for clip in clips:
         try:
-            result = compute_audio_keep_ranges(audio, clip)
-            updated.append(
-                clip.model_copy(update={"keep_ranges_sec": result.keep_ranges_sec})
+            result = compute_audio_keep_ranges(
+                audio,
+                clip,
+                filled_pause_enabled=filled_pause_enabled,
+                require_filled_pause=require_filled_pause,
             )
+            updated_clip = clip.model_copy(update={"keep_ranges_sec": result.keep_ranges_sec})
+            if transcript is not None:
+                updated_clip = _complete_keep_range_tail(updated_clip, transcript)
+            updated.append(updated_clip)
             diagnostics[clip.clip_id] = {
                 "outer_window_sec": list(result.outer_window_sec),
                 "speech_ranges_sec": [list(rng) for rng in result.speech_ranges_sec],
@@ -464,6 +480,53 @@ def apply_audio_keep_ranges(
                 "warnings": [f"audio keep-range detection failed: {exc}"],
             }
     return updated, diagnostics
+
+
+def _complete_trim_end_to_transcript_boundary(clip: Clip, transcript: dict) -> float:
+    """Reduce ``trim_end_sec`` when it would cut before a sentence completes."""
+    if clip.trim_end_sec <= 0.05:
+        return clip.trim_end_sec
+    outer_end = clip.end_time_sec - clip.trim_end_sec
+    probe = clip.model_copy(
+        update={
+            "end_time_sec": outer_end,
+            "trim_start_sec": 0.0,
+            "trim_end_sec": 0.0,
+            "keep_ranges_sec": [],
+        }
+    )
+    [completed] = complete_clip_boundaries([probe], transcript)
+    completed_end = min(clip.end_time_sec, completed.end_time_sec)
+    return max(0.0, clip.end_time_sec - completed_end)
+
+
+def _complete_keep_range_tail(clip: Clip, transcript: dict) -> Clip:
+    """Extend the final audio keep range when it ends before the words do."""
+    if not clip.keep_ranges_sec:
+        return clip
+    outer_end = max(0.0, min(clip.duration_sec, clip.duration_sec - clip.trim_end_sec))
+    last_start, last_end = clip.keep_ranges_sec[-1]
+    probe = clip.model_copy(
+        update={
+            "end_time_sec": clip.start_time_sec + float(last_end),
+            "trim_start_sec": 0.0,
+            "trim_end_sec": 0.0,
+            "keep_ranges_sec": [],
+        }
+    )
+    [completed] = complete_clip_boundaries([probe], transcript)
+    completed_rel_end = min(outer_end, completed.end_time_sec - clip.start_time_sec)
+    if completed_rel_end <= float(last_end) + 1e-3:
+        return clip
+    ranges = list(clip.keep_ranges_sec)
+    ranges[-1] = (float(last_start), completed_rel_end)
+    logger.info(
+        "Clip %s: audio keep-range tail extended %.2fs -> %.2fs to finish transcript boundary.",
+        clip.clip_id,
+        last_end,
+        completed_rel_end,
+    )
+    return clip.model_copy(update={"keep_ranges_sec": ranges})
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +632,8 @@ def _prune_meta(
         "audio_sha256": audio_fp,
         "llm": resolved_llm_identity(config),
         "prune_level": level,
+        "filled_pause_pruning": bool(config.filled_pause_pruning),
+        "require_filled_pause_pruning": bool(config.require_filled_pause_pruning),
         "audio_policy_version": _AUDIO_POLICY_VERSION,
     }
 
@@ -666,6 +731,12 @@ def _prune_cache_valid(
     if meta.get("llm") != resolved_llm_identity(config):
         return False
     if meta.get("prune_level") != level:
+        return False
+    if bool(meta.get("filled_pause_pruning", False)) != bool(config.filled_pause_pruning):
+        return False
+    if bool(meta.get("require_filled_pause_pruning", False)) != bool(
+        config.require_filled_pause_pruning
+    ):
         return False
     if meta.get("audio_policy_version") != _AUDIO_POLICY_VERSION:
         return False
@@ -825,6 +896,9 @@ def run_content_pruning_stage(
     pruned, diagnostics = apply_audio_keep_ranges(
         pruned,
         source_audio_path=source_audio_path,
+        transcript=transcript,
+        filled_pause_enabled=config.filled_pause_pruning,
+        require_filled_pause=config.require_filled_pause_pruning,
     )
     _log_prune_summary(pruned, clips)
 

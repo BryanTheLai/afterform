@@ -108,6 +108,40 @@ Examples:
         help="Re-run clip selection even when clips.meta.json matches the transcript.",
     )
     parser.add_argument(
+        "--clip-mode",
+        choices=["curated", "exhaustive"],
+        default="curated",
+        help=(
+            "Clip-selection policy. curated keeps the threshold/floor/cap behavior; "
+            "exhaustive keeps every distinct clip above the quality bar."
+        ),
+    )
+    parser.add_argument(
+        "--clip-candidate-count",
+        type=int,
+        default=12,
+        help="Candidate pool size requested from the clip-selection model (default: 12).",
+    )
+    parser.add_argument(
+        "--clip-quality-threshold",
+        type=float,
+        default=0.70,
+        help="Minimum clip quality score for threshold selection (default: 0.70).",
+    )
+    parser.add_argument(
+        "--max-clips",
+        default=None,
+        help=(
+            "Maximum clips to keep. Use 'none' for no arbitrary cap. "
+            "Defaults: 8 in curated mode, none in exhaustive mode."
+        ),
+    )
+    parser.add_argument(
+        "--review-only-clips",
+        action="store_true",
+        help="Stop after clip selection so the discovered clip set can be reviewed before render.",
+    )
+    parser.add_argument(
         "--llm-vision-model",
         "--gemini-vision-model",
         dest="llm_vision_model",
@@ -133,6 +167,16 @@ Examples:
         "--force-content-pruning",
         action="store_true",
         help="Re-run content pruning even when prune.meta.json matches.",
+    )
+    parser.add_argument(
+        "--filled-pause-pruning",
+        action="store_true",
+        help="Opt in to audio-model removal of filled pauses such as um/uh/hmm.",
+    )
+    parser.add_argument(
+        "--require-filled-pause-pruning",
+        action="store_true",
+        help="Fail if --filled-pause-pruning cannot run because optional models are unavailable.",
     )
     parser.add_argument(
         "--no-hook-detection",
@@ -239,6 +283,29 @@ def main(argv: list[str] | None = None) -> None:
     detect_hooks = not args.no_hook_detection
     overwrite_outputs = False
     work_dir = args.work_dir
+    stop_after = args.stop_after
+    max_clips = 8
+
+    if args.clip_candidate_count <= 0:
+        parser.error("--clip-candidate-count must be greater than 0.")
+    if not 0.0 <= args.clip_quality_threshold <= 1.0:
+        parser.error("--clip-quality-threshold must be between 0 and 1.")
+    if args.max_clips is None and args.clip_mode == "exhaustive":
+        max_clips = None
+    elif args.max_clips is not None:
+        if str(args.max_clips).strip().lower() == "none":
+            max_clips = None
+        else:
+            try:
+                max_clips = int(args.max_clips)
+            except ValueError:
+                parser.error("--max-clips must be a positive integer or 'none'.")
+            if max_clips <= 0:
+                parser.error("--max-clips must be a positive integer or 'none'.")
+    if args.review_only_clips:
+        if stop_after is not None and normalize_stage(stop_after) != "clip-selection":
+            parser.error("--review-only-clips cannot be combined with --stop-after other than clip-selection.")
+        stop_after = "clip-selection"
 
     if args.clean_run:
         use_video_cache = False
@@ -266,6 +333,12 @@ def main(argv: list[str] | None = None) -> None:
         overwrite_outputs=overwrite_outputs,
         prune_level=args.prune_level,
         force_content_pruning=force_content_pruning,
+        filled_pause_pruning=args.filled_pause_pruning or args.require_filled_pause_pruning,
+        require_filled_pause_pruning=args.require_filled_pause_pruning,
+        clip_selection_mode=args.clip_mode,
+        clip_selection_candidate_count=args.clip_candidate_count,
+        clip_selection_quality_threshold=args.clip_quality_threshold,
+        clip_selection_max_kept=max_clips,
         detect_hooks=detect_hooks,
         force_hook_detection=force_hook_detection,
         subtitle_font_size=args.subtitle_font_size,
@@ -273,7 +346,7 @@ def main(argv: list[str] | None = None) -> None:
         subtitle_max_words_per_cue=args.subtitle_max_words,
         subtitle_max_cue_sec=args.subtitle_max_cue_sec,
         start_at=args.start_at,
-        stop_after=args.stop_after,
+        stop_after=stop_after,
         inspect_stage=args.inspect_stage,
         clip_id=args.clip_id,
     )
@@ -306,8 +379,8 @@ def main(argv: list[str] | None = None) -> None:
             return
 
         outputs = run_pipeline(config)
-        if normalize_stage(args.stop_after) and normalize_stage(args.stop_after) != "render":
-            print(f"\nDone. Stopped after: {args.stop_after}")
+        if normalize_stage(stop_after) and normalize_stage(stop_after) != "render":
+            print(f"\nDone. Stopped after: {stop_after}")
         else:
             print(f"\nDone. {len(outputs)} shorts generated in: {config.output_dir}")
             for output_path in outputs:
