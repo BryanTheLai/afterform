@@ -64,12 +64,10 @@ mcp = FastMCP(
 
 @mcp.tool()
 def list_layouts() -> dict[str, Any]:
-    """Return the 5 fixed 9:16 layouts this server supports.
+    """Return the fixed 9:16 layouts this server supports.
 
-    Every short shows **at most two** on-screen items (person/chart), which
-    gives exactly five recipes. Use this to discover the set of
-    :class:`LayoutKind` values before classifying scenes or requesting
-    renders.
+    Use this to discover the set of :class:`LayoutKind` values before
+    classifying scenes or requesting renders.
     """
 
     return {
@@ -83,6 +81,14 @@ def list_layouts() -> dict[str, Any]:
                 "kind": LayoutKind.SIT_CENTER.value,
                 "items": ["person"],
                 "description": "1 person, interview / seated framing, centered.",
+            },
+            {
+                "kind": LayoutKind.WIDE_VISUAL.value,
+                "items": ["chart"],
+                "description": (
+                    "1 wide article / slide / screenshot. The full source frame is contained "
+                    "inside 9:16 without center-cropping horizontal content."
+                ),
             },
             {
                 "kind": LayoutKind.SPLIT_CHART_PERSON.value,

@@ -127,6 +127,24 @@ def test_content_pruning_inspection_reads_runtime_keep_ranges(tmp_path: Path):
     assert payload["prune"][0]["diagnostics"]["audio_backend"]["speech"] == "energy_vad"
 
 
+def test_render_state_loads_visual_drop_ranges_from_layout_cache(tmp_path: Path):
+    _seed_workdir(tmp_path)
+    data = json.loads((tmp_path / "layout_vision.json").read_text(encoding="utf-8"))
+    data["clips"]["001"]["visual_drop_ranges_sec"] = [[0.4, 0.6]]
+    _write_json(tmp_path / "layout_vision.json", data)
+    cfg = PipelineConfig(
+        youtube_url="https://youtu.be/abc",
+        work_dir=tmp_path,
+        detect_hooks=True,
+        prune_level="balanced",
+    )
+
+    state = load_state_before_stage(tmp_path, stage="render", config=cfg)
+
+    assert state.layout_instructions is not None
+    assert state.layout_instructions["001"].visual_drop_ranges_sec == [(0.4, 0.6)]
+
+
 def test_render_inspection_exposes_concat_spans_and_command(tmp_path: Path):
     _seed_workdir(tmp_path)
     cfg = PipelineConfig(

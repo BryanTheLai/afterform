@@ -154,6 +154,21 @@ class _SplitStrip:
             f"crop={out_w}:{band_h},setsar=1[{out_label}]"
         )
 
+    def filter_contain(self, input_label: str, out_w: int, band_h: int, out_label: str) -> str:
+        """Return readable contained foreground over a blurred cover background."""
+        bg_src = f"{out_label}_bg_src"
+        fg_src = f"{out_label}_fg_src"
+        bg = f"{out_label}_bg"
+        fg = f"{out_label}_fg"
+        return (
+            f"[{input_label}]crop={self.cw}:{self.ch}:{self.x}:{self.y},"
+            f"split=2[{bg_src}][{fg_src}];"
+            f"[{bg_src}]scale={out_w}:{band_h}:force_original_aspect_ratio=increase,"
+            f"crop={out_w}:{band_h},gblur=sigma=18[{bg}];"
+            f"[{fg_src}]scale={out_w}:{band_h}:force_original_aspect_ratio=decrease[{fg}];"
+            f"[{bg}][{fg}]overlay=(W-w)/2:(H-h)/2,setsar=1[{out_label}]"
+        )
+
 
 def _bbox_strip(
     box: BoundingBox | None,
@@ -282,6 +297,10 @@ def plan_sit_center(
     so faces sit slightly above the 9:16 middle instead of centered on a
     subject's chest.
     """
+    if instruction.zoom < 1.0:
+        strip = _SplitStrip(cw=_even(src_w), ch=_even(src_h), x=0, y=0)
+        return FilterPlan(filtergraph=strip.filter_contain(input_label, out_w, out_h, "vout"))
+
     zoom = max(instruction.zoom, 1.0)
     cw, ch, x, y = _crop_box(
         src_w, src_h, 9 / 16, zoom, instruction.person_x_norm, 0.48
@@ -289,6 +308,40 @@ def plan_sit_center(
     fg = (
         f"[{input_label}]crop={cw}:{ch}:{x}:{y},"
         f"scale={out_w}:{out_h}:flags=lanczos,setsar=1[vout]"
+    )
+    return FilterPlan(filtergraph=fg)
+
+
+def plan_wide_visual(
+    instruction: LayoutInstruction,
+    *,
+    out_w: int,
+    out_h: int,
+    src_w: int = DEFAULT_SRC_W,
+    src_h: int = DEFAULT_SRC_H,
+    input_label: str = "0:v",
+) -> FilterPlan:
+    """1 wide visual/article/screenshot.
+
+    If vision gave us a very wide/thin region, use a cover crop so article
+    text/screenshots become readable in 9:16. Without a region, preserve the
+    full source frame with letterbox padding.
+    """
+    prefix = f"[{input_label}]"
+    if instruction.split_chart_region is not None:
+        region = instruction.split_chart_region
+        cw, ch, x, y = _bbox_to_crop_pixels(region, src_w, src_h)
+        pad_x = _even(max(0, int(round(cw * 0.08))))
+        pad_y = _even(max(0, int(round(ch * 0.12))))
+        x = _even(max(0, x - pad_x))
+        y = _even(max(0, y - pad_y))
+        cw = _even(max(2, min(src_w - x, cw + pad_x * 2)))
+        ch = _even(max(2, min(src_h - y, ch + pad_y * 2)))
+        strip = _SplitStrip(cw=cw, ch=ch, x=x, y=y)
+        return FilterPlan(filtergraph=strip.filter_contain(input_label, out_w, out_h, "vout"))
+    fg = (
+        f"{prefix}scale={out_w}:{out_h}:force_original_aspect_ratio=decrease,"
+        f"pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[vout]"
     )
     return FilterPlan(filtergraph=fg)
 
@@ -333,10 +386,16 @@ def plan_split_chart_person(
     person_box = instruction.split_person_region
 
     if chart_box is not None and person_box is not None:
+        chart_is_left = chart_box.center_x <= person_box.center_x
+        left_box = chart_box if chart_is_left else person_box
+        right_box = person_box if chart_is_left else chart_box
         seam = _compute_seam(
-            left_box=chart_box, right_box=person_box, src_w=src_w, src_h=src_h
+            left_box=left_box, right_box=right_box, src_w=src_w, src_h=src_h
         )
-        chart_start = 0
+        chart_start = 0 if chart_is_left else seam
+        chart_end = seam if chart_is_left else src_w
+        person_start = seam if chart_is_left else 0
+        person_end = src_w if chart_is_left else seam
     else:
         # Historical default: chart = left 2/3, person = right 1/3 (the
         # Ark-style explainer-slide geometry this codebase was originally
@@ -345,12 +404,29 @@ def plan_split_chart_person(
         seam = _even(max(2, min(src_w - 2, int(round((2.0 / 3.0) * float(src_w))))))
         trim = int(round(_clamp01(instruction.chart_x_norm) * float(seam)))
         chart_start = _even(max(0, min(seam - 2, trim)))
+        chart_end = seam
+        person_start = seam
+        person_end = src_w
 
+    # The LLM often reports tight face boxes inside a larger photo insert
+    # (for example a founder headshot) as ``chart_bbox``. If we use that
+    # bbox vertically, cover-scaling turns the top band into an eye/nose crop.
+    # Once both side panes are known, render the full pane height; the seam
+    # still preserves left/right composition while avoiding bbox over-trust.
+    use_full_side_panes = chart_box is not None and person_box is not None
     chart_strip = _bbox_strip(
-        chart_box, src_w=src_w, src_h=src_h, x_start=chart_start, x_end=seam
+        None if use_full_side_panes else chart_box,
+        src_w=src_w,
+        src_h=src_h,
+        x_start=chart_start,
+        x_end=chart_end,
     )
     person_strip = _bbox_strip(
-        person_box, src_w=src_w, src_h=src_h, x_start=seam, x_end=src_w
+        None if use_full_side_panes else person_box,
+        src_w=src_w,
+        src_h=src_h,
+        x_start=person_start,
+        x_end=person_end,
     )
     return _emit_split(
         chart_strip=chart_strip,
@@ -374,22 +450,22 @@ def _emit_split(
     input_label: str,
 ) -> FilterPlan:
     if order == FocusStackOrder.CHART_THEN_PERSON:
-        fg = _stack_filtergraph(
-            top_strip=chart_strip,
-            bot_strip=person_strip,
-            out_w=out_w,
-            top_h=top_h,
-            bot_h=bot_h,
-            input_label=input_label,
+        top_fg = chart_strip.filter_contain("src1", out_w, top_h, "top")
+        bot_fg = person_strip.filter_crop("src2", out_w, bot_h, "bot")
+        fg = (
+            f"[{input_label}]split=2[src1][src2];"
+            f"{top_fg};"
+            f"{bot_fg};"
+            f"[top][bot]vstack=inputs=2[vout]"
         )
     else:
-        fg = _stack_filtergraph(
-            top_strip=person_strip,
-            bot_strip=chart_strip,
-            out_w=out_w,
-            top_h=top_h,
-            bot_h=bot_h,
-            input_label=input_label,
+        top_fg = person_strip.filter_crop("src1", out_w, top_h, "top")
+        bot_fg = chart_strip.filter_contain("src2", out_w, bot_h, "bot")
+        fg = (
+            f"[{input_label}]split=2[src1][src2];"
+            f"{top_fg};"
+            f"{bot_fg};"
+            f"[top][bot]vstack=inputs=2[vout]"
         )
     return FilterPlan(filtergraph=fg)
 
@@ -479,6 +555,7 @@ def plan_split_two_charts(
 _DISPATCH = {
     LayoutKind.ZOOM_CALL_CENTER: plan_zoom_call_center,
     LayoutKind.SIT_CENTER: plan_sit_center,
+    LayoutKind.WIDE_VISUAL: plan_wide_visual,
     LayoutKind.SPLIT_CHART_PERSON: plan_split_chart_person,
     LayoutKind.SPLIT_TWO_PERSONS: plan_split_two_persons,
     LayoutKind.SPLIT_TWO_CHARTS: plan_split_two_charts,

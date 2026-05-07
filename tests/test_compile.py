@@ -1,3 +1,8 @@
+import shutil
+import subprocess
+
+import pytest
+
 from afterform.primitives.compile import build_ffmpeg_cmd, plan_title_drawtext
 from afterform.schemas import Clip, LayoutInstruction, LayoutKind, RenderRequest
 
@@ -58,11 +63,117 @@ def test_inner_keep_ranges_switch_to_concat_filtergraph():
     )
     cmd = build_ffmpeg_cmd(_req(clip=clip))
     fg = cmd[cmd.index("-filter_complex") + 1]
-    assert "trim=start=0.000:end=4.000" in fg
-    assert "atrim=start=6.000:end=10.000" in fg
+    assert "trim=start=10.000:end=14.000" in fg
+    assert "atrim=start=16.000:end=20.000" in fg
     assert "concat=n=2:v=1:a=1[vclip][aclip]" in fg
     assert "[aclip]volume=8dB,alimiter=limit=0.95,aresample=44100[aout]" in fg
     assert "[aout]" in cmd
+
+
+def test_keep_ranges_trim_absolute_source_without_input_seek():
+    """Interior keep-range gaps must be removed on the source timeline.
+
+    Regression for rendered shorts leaking transition/junk frames: input-level
+    ``-ss/-t`` plus relative concat trims can decode the enclosing continuous
+    source window instead of the explicit kept spans.
+    """
+    clip = Clip(
+        clip_id="1",
+        topic="t",
+        start_time_sec=100.0,
+        end_time_sec=120.0,
+        keep_ranges_sec=[(0.0, 2.0), (5.0, 7.0)],
+    )
+    cmd = build_ffmpeg_cmd(_req(clip=clip))
+    input_idx = cmd.index("-i")
+    assert "-ss" not in cmd[:input_idx]
+    assert "-t" not in cmd[:input_idx]
+
+    fg = cmd[cmd.index("-filter_complex") + 1]
+    assert "trim=start=100.000:end=102.000" in fg
+    assert "atrim=start=105.000:end=107.000" in fg
+    assert "trim=start=0.000:end=2.000" not in fg
+
+
+def test_keep_ranges_render_only_selected_source_spans(tmp_path):
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("ffmpeg/ffprobe not available")
+
+    src = tmp_path / "source.mp4"
+    out = tmp_path / "out.mp4"
+    colors = ["red", "green", "blue", "yellow", "magenta", "cyan", "white", "black"]
+    gen_cmd = [ffmpeg, "-y"]
+    for color in colors:
+        gen_cmd.extend(["-f", "lavfi", "-i", f"color=c={color}:s=160x90:d=1:r=5"])
+    concat_inputs = "".join(f"[{idx}:v]" for idx in range(len(colors)))
+    gen_cmd.extend(
+        [
+            "-filter_complex",
+            f"{concat_inputs}concat=n={len(colors)}:v=1:a=0,format=yuv420p[v]",
+            "-map",
+            "[v]",
+            str(src),
+        ]
+    )
+    subprocess.run(gen_cmd, check=True, capture_output=True)
+
+    clip = Clip(
+        clip_id="1",
+        topic="t",
+        start_time_sec=0.0,
+        end_time_sec=8.0,
+        keep_ranges_sec=[(1.0, 2.0), (4.0, 5.0)],
+    )
+    req = _req(source_path=str(src), output_path=str(out), clip=clip)
+    cmd = build_ffmpeg_cmd(req, src_w=160, src_h=90, include_audio=False)
+    subprocess.run(cmd, check=True, capture_output=True)
+
+    duration = subprocess.run(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(out),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert float(duration.stdout.strip()) == pytest.approx(2.0, abs=0.25)
+
+    def center_pixel(ts: float) -> tuple[int, int, int]:
+        sample = subprocess.run(
+            [
+                ffmpeg,
+                "-v",
+                "error",
+                "-ss",
+                f"{ts:.3f}",
+                "-i",
+                str(out),
+                "-frames:v",
+                "1",
+                "-vf",
+                "crop=1:1:540:960,format=rgb24",
+                "-f",
+                "rawvideo",
+                "-",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return tuple(sample.stdout[:3])
+
+    r, g, b = center_pixel(0.5)
+    assert g > r + 40 and g > b + 40
+    r, g, b = center_pixel(1.5)
+    assert r > g + 40 and b > g + 40
 
 
 def test_subtitle_style_uses_requested_font_and_margin():
@@ -124,6 +235,7 @@ def test_title_is_suppressed_on_split_layouts():
         LayoutKind.SPLIT_CHART_PERSON,
         LayoutKind.SPLIT_TWO_PERSONS,
         LayoutKind.SPLIT_TWO_CHARTS,
+        LayoutKind.WIDE_VISUAL,
     ):
         cmd = build_ffmpeg_cmd(
             _req(

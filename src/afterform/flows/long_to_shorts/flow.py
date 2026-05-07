@@ -38,8 +38,8 @@ from afterform.flows.long_to_shorts.stage_inspection import (
     stage_range,
     write_inspection,
 )
-from afterform.flows.long_to_shorts.render_window import clip_for_render
-from afterform.flows.long_to_shorts.render import reframe_clip_ffmpeg
+from afterform.flows.long_to_shorts.render_window import apply_visual_drop_ranges, clip_for_render
+from afterform.flows.long_to_shorts.render import reframe_clip_ffmpeg, reframe_clip_timeline_ffmpeg
 from afterform.flows.long_to_shorts.video_cache import (
     extract_youtube_video_id,
     ingest_complete,
@@ -282,11 +282,15 @@ def _run_render_stage(config: PipelineConfig, state: PipelineState) -> list[Path
     layout_instructions = state.layout_instructions or {}
 
     for clip in state.clips:
-        instr = layout_instructions.get(clip.clip_id)
-        if instr is None:
+        layout_plan = layout_instructions.get(clip.clip_id)
+        if layout_plan is None:
             hint = clip.layout_hint or LayoutKind.SIT_CENTER
             instr = LayoutInstruction(clip_id=clip.clip_id, layout=hint)
+        else:
+            instr = layout_plan.instruction
         clip.layout = instr.layout
+        if layout_plan is not None and layout_plan.visual_drop_ranges_sec:
+            clip = apply_visual_drop_ranges(clip, layout_plan.visual_drop_ranges_sec)
         rclip = clip_for_render(clip)
         subtitle_path = generate_ass(
             rclip,
@@ -307,16 +311,28 @@ def _run_render_stage(config: PipelineConfig, state: PipelineState) -> list[Path
         if final_path.exists() and config.overwrite_outputs:
             logger.info("Clip %s exists; overwriting due to clean-run settings.", clip.clip_id)
 
-        reframe_clip_ffmpeg(
-            input_path=state.source_video,
-            output_path=final_path,
-            clip=rclip,
-            layout_instruction=instr,
-            subtitle_path=subtitle_path,
-            subtitle_font_size=config.subtitle_font_size,
-            subtitle_margin_v=config.subtitle_margin_v,
-            title_text=clip.suggested_overlay_title,
-        )
+        if layout_plan is not None and len(layout_plan.layout_timeline) > 1:
+            reframe_clip_timeline_ffmpeg(
+                input_path=state.source_video,
+                output_path=final_path,
+                clip=rclip,
+                layout_plan=layout_plan,
+                subtitle_path=subtitle_path,
+                subtitle_font_size=config.subtitle_font_size,
+                subtitle_margin_v=config.subtitle_margin_v,
+                title_text=clip.suggested_overlay_title,
+            )
+        else:
+            reframe_clip_ffmpeg(
+                input_path=state.source_video,
+                output_path=final_path,
+                clip=rclip,
+                layout_instruction=instr,
+                subtitle_path=subtitle_path,
+                subtitle_font_size=config.subtitle_font_size,
+                subtitle_margin_v=config.subtitle_margin_v,
+                title_text=clip.suggested_overlay_title,
+            )
         final_outputs.append(final_path)
 
     return final_outputs
