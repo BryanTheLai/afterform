@@ -91,9 +91,10 @@ class PipelineConfig:
     prune_level: str = "balanced"
     # When True, re-run the pruning LLM even when prune.meta.json matches.
     force_content_pruning: bool = False
-    # Filled-pause pruning is opt-in because it requires optional audio models
-    # and can create bad micro-cuts if the detector is wrong.
-    filled_pause_pruning: bool = False
+    # Filled-pause pruning is enabled by default so common "um/uh/hmm" spans
+    # are removed when the optional runtime is available. The stage still
+    # degrades safely to a no-op when the detector cannot run.
+    filled_pause_pruning: bool = True
     # When True, fail the run if filled-pause pruning was requested but the
     # detector runtime is unavailable.
     require_filled_pause_pruning: bool = False

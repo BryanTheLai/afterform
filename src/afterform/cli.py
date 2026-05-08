@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -17,18 +19,121 @@ from afterform.flows.long_to_shorts.stage_inspection import (
     write_inspection,
 )
 
+_LOG_TRIM_EDGE = 20
+_LOG_TRIM_THRESHOLD = 512
+_LOG_SPECIAL_KEYS = {"image_url", "url", "data", "b64_json", "base64"}
+
+
+def _trim_log_string(value: str, *, edge: int = _LOG_TRIM_EDGE) -> str:
+    if len(value) <= edge * 2:
+        return value
+    return f"{value[:edge]}...{value[-edge:]} [len={len(value)}]"
+
+
+def _sanitize_log_value(value: object, *, key: str | None = None) -> object:
+    if isinstance(value, Mapping):
+        return {str(k): _sanitize_log_value(v, key=str(k)) for k, v in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_sanitize_log_value(item) for item in value]
+    if isinstance(value, (bytes, bytearray)):
+        return f"<bytes len={len(value)}>"
+    if hasattr(value, "model_dump") and callable(getattr(value, "model_dump")):
+        try:
+            return _sanitize_log_value(value.model_dump(), key=key)
+        except Exception:
+            return repr(value)
+    if not isinstance(value, str):
+        return value
+
+    key_name = (key or "").lower()
+    should_trim = (
+        value.startswith("data:")
+        or (key_name in _LOG_SPECIAL_KEYS and len(value) > (_LOG_TRIM_EDGE * 2))
+        or len(value) > _LOG_TRIM_THRESHOLD
+    )
+    if should_trim:
+        return _trim_log_string(value)
+    return value
+
+
+def _coerce_log_argument(value: object) -> object:
+    sanitized = _sanitize_log_value(value)
+    if isinstance(sanitized, (dict, list)):
+        return json.dumps(sanitized, indent=2, ensure_ascii=False)
+    return sanitized
+
+
+class _PrettyJsonLogFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        rendered = logging.makeLogRecord(record.__dict__.copy())
+
+        if rendered.args:
+            if isinstance(rendered.args, Mapping):
+                if "%(" in str(rendered.msg):
+                    rendered.args = {
+                        key: _coerce_log_argument(value) for key, value in rendered.args.items()
+                    }
+                else:
+                    rendered.args = (
+                        json.dumps(
+                            _sanitize_log_value(rendered.args),
+                            indent=2,
+                            ensure_ascii=False,
+                        ),
+                    )
+            elif isinstance(rendered.args, tuple):
+                rendered.args = tuple(_coerce_log_argument(value) for value in rendered.args)
+            else:
+                rendered.args = _coerce_log_argument(rendered.args)
+        elif isinstance(rendered.msg, (dict, list)):
+            rendered.msg = json.dumps(
+                _sanitize_log_value(rendered.msg),
+                indent=2,
+                ensure_ascii=False,
+            )
+        elif isinstance(rendered.msg, str):
+            stripped = rendered.msg.strip()
+            if stripped.startswith(("{", "[")):
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    rendered.msg = _sanitize_log_value(rendered.msg)
+                else:
+                    rendered.msg = json.dumps(
+                        _sanitize_log_value(parsed),
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+            else:
+                rendered.msg = _sanitize_log_value(rendered.msg)
+
+        return super().format(rendered)
+
 
 def setup_logging(verbose: bool = False) -> None:
     """Configure logging for the public ``afterform`` CLI."""
     level = logging.DEBUG if verbose else logging.INFO
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(
+        _PrettyJsonLogFormatter(
+            fmt="%(asctime)s | %(levelname)-7s | %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    )
     logging.basicConfig(
         level=level,
-        format="%(asctime)s | %(levelname)-7s | %(message)s",
-        datefmt="%H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
+        handlers=[handler],
+        force=True,
     )
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def config_default_filled_pause_pruning(flag_value: bool | None) -> bool:
+    if flag_value is None:
+        field = PipelineConfig.__dataclass_fields__["filled_pause_pruning"]
+        return bool(field.default)
+    return flag_value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,6 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
 Examples:
   afterform run long-to-shorts "https://youtube.com/watch?v=abc123"
   afterform run long-to-shorts "https://youtube.com/watch?v=abc123" --work-dir .afterform_work
+  afterform run long-to-shorts "https://youtube.com/watch?v=abc123" --run-dir .afterform_runs/run_001
   afterform run long-to-shorts "https://youtube.com/watch?v=abc123" --llm-model gemini-2.0-flash
         """,
     )
@@ -74,6 +180,15 @@ Examples:
         type=Path,
         default=None,
         help="Working directory for intermediate files. Default: per-video folder under the cache root.",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Parent directory for one isolated run. Expands to "
+            "<run-dir>/work for intermediates and <run-dir>/output for final shorts."
+        ),
     )
     parser.add_argument(
         "--no-video-cache",
@@ -170,8 +285,16 @@ Examples:
     )
     parser.add_argument(
         "--filled-pause-pruning",
+        dest="filled_pause_pruning",
         action="store_true",
-        help="Opt in to audio-model removal of filled pauses such as um/uh/hmm.",
+        default=None,
+        help="Enable audio-model removal of filled pauses such as um/uh/hmm (default: on).",
+    )
+    parser.add_argument(
+        "--no-filled-pause-pruning",
+        dest="filled_pause_pruning",
+        action="store_false",
+        help="Disable filled-pause pruning for this run.",
     )
     parser.add_argument(
         "--require-filled-pause-pruning",
@@ -283,8 +406,18 @@ def main(argv: list[str] | None = None) -> None:
     detect_hooks = not args.no_hook_detection
     overwrite_outputs = False
     work_dir = args.work_dir
+    output_dir = args.output
     stop_after = args.stop_after
     max_clips = 8
+
+    if args.run_dir is not None:
+        if args.work_dir is not None:
+            parser.error("--run-dir cannot be combined with --work-dir.")
+        if args.output != Path("output"):
+            parser.error("--run-dir cannot be combined with an explicit --output.")
+        run_dir = Path(args.run_dir)
+        work_dir = run_dir / "work"
+        output_dir = run_dir / "output"
 
     if args.clip_candidate_count <= 0:
         parser.error("--clip-candidate-count must be greater than 0.")
@@ -320,7 +453,7 @@ def main(argv: list[str] | None = None) -> None:
 
     config = PipelineConfig(
         youtube_url=source,
-        output_dir=args.output,
+        output_dir=output_dir,
         work_dir=work_dir,
         use_video_cache=use_video_cache,
         cache_root=args.cache_root,
@@ -333,7 +466,11 @@ def main(argv: list[str] | None = None) -> None:
         overwrite_outputs=overwrite_outputs,
         prune_level=args.prune_level,
         force_content_pruning=force_content_pruning,
-        filled_pause_pruning=args.filled_pause_pruning or args.require_filled_pause_pruning,
+        filled_pause_pruning=(
+            True
+            if args.require_filled_pause_pruning
+            else config_default_filled_pause_pruning(args.filled_pause_pruning)
+        ),
         require_filled_pause_pruning=args.require_filled_pause_pruning,
         clip_selection_mode=args.clip_mode,
         clip_selection_candidate_count=args.clip_candidate_count,

@@ -11,7 +11,7 @@ Large binaries do not belong in git. `.gitignore` excludes **`output/`**, **`*.m
 ## Easiest ways to show work
 
 1. **Public GitHub repo** - share the source, docs, and tests.
-2. **Rendered docs on GitHub** - point people at `README.md`, `docs/PIPELINE.md`, and `docs/TARGET_VIDEO_ANALYSIS.md`.
+2. **Rendered docs on GitHub** - point people at `README.md`, `docs/PIPELINE.md`, and `docs/long-to-shorts.md`.
 3. **Raw file links** - useful for logs or machine-readable artifacts you decide to commit later.
 4. **YouTube or cloud storage** - share rendered shorts without bloating the repo.
 
