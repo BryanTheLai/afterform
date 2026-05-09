@@ -146,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
 Examples:
   afterform run long-to-shorts "https://youtube.com/watch?v=abc123"
   afterform run long-to-shorts "https://youtube.com/watch?v=abc123" --work-dir .afterform_work
-  afterform run long-to-shorts "https://youtube.com/watch?v=abc123" --run-dir .afterform_runs/run_001
+  afterform run long-to-shorts "https://youtube.com/watch?v=abc123" --run-dir .afterform/runs/run_001
   afterform run long-to-shorts "https://youtube.com/watch?v=abc123" --llm-model gemini-2.0-flash
         """,
     )
@@ -173,7 +173,7 @@ Examples:
         "-o",
         type=Path,
         default=Path("output"),
-        help="Output directory for final shorts (default: ./output)",
+        help="Output directory for final shorts. Defaults to <run-dir>/output for normal URL runs.",
     )
     parser.add_argument(
         "--work-dir",
@@ -193,7 +193,7 @@ Examples:
     parser.add_argument(
         "--no-video-cache",
         action="store_true",
-        help="Do not use per-video cache dirs; use ./.afterform_work unless --work-dir is set.",
+        help="Do not use per-video cache dirs; use the isolated run work dir unless --work-dir is set.",
     )
     parser.add_argument(
         "--cache-root",
@@ -409,13 +409,14 @@ def main(argv: list[str] | None = None) -> None:
     output_dir = args.output
     stop_after = args.stop_after
     max_clips = 8
+    run_dir = args.run_dir
+    auto_run_dir = False
 
-    if args.run_dir is not None:
+    if run_dir is not None:
         if args.work_dir is not None:
             parser.error("--run-dir cannot be combined with --work-dir.")
         if args.output != Path("output"):
             parser.error("--run-dir cannot be combined with an explicit --output.")
-        run_dir = Path(args.run_dir)
         work_dir = run_dir / "work"
         output_dir = run_dir / "output"
 
@@ -440,6 +441,12 @@ def main(argv: list[str] | None = None) -> None:
             parser.error("--review-only-clips cannot be combined with --stop-after other than clip-selection.")
         stop_after = "clip-selection"
 
+    if work_dir is None and run_dir is None and args.output == Path("output") and not inspect_only:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = Path(".afterform") / "runs" / f"run_{stamp}"
+        output_dir = run_dir / "output"
+        auto_run_dir = True
+
     if args.clean_run:
         use_video_cache = False
         force_clip_selection = True
@@ -447,13 +454,16 @@ def main(argv: list[str] | None = None) -> None:
         force_content_pruning = True
         force_hook_detection = True
         overwrite_outputs = True
-        if work_dir is None:
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            work_dir = Path(f".afterform_work_clean_{stamp}")
+
+    if work_dir is None and run_dir is not None and (auto_run_dir and not use_video_cache):
+        work_dir = run_dir / "work"
 
     config = PipelineConfig(
         youtube_url=source,
         output_dir=output_dir,
+        run_dir=run_dir
+        if run_dir is not None
+        else (work_dir.parent if work_dir and work_dir.name == "work" else None),
         work_dir=work_dir,
         use_video_cache=use_video_cache,
         cache_root=args.cache_root,

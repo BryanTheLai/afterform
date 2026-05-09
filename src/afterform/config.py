@@ -49,6 +49,7 @@ class PipelineConfig:
 
     youtube_url: str | None = None
     output_dir: Path = field(default_factory=lambda: Path("output"))
+    run_dir: Path | None = None
     # None = auto: per-video dir under the cache root (see docs/ENVIRONMENT.md).
     work_dir: Path | None = None
     use_video_cache: bool = True
@@ -132,6 +133,9 @@ class PipelineConfig:
     def __post_init__(self):
         self.output_dir = Path(self.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        if self.run_dir is not None:
+            self.run_dir = Path(self.run_dir)
+            self.run_dir.mkdir(parents=True, exist_ok=True)
         if self.cache_root is not None:
             self.cache_root = Path(self.cache_root)
         if self.work_dir is not None:

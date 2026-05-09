@@ -40,6 +40,7 @@ from afterform.flows.long_to_shorts.stage_inspection import (
 )
 from afterform.flows.long_to_shorts.render_window import apply_visual_drop_ranges, clip_for_render
 from afterform.flows.long_to_shorts.render import reframe_clip_ffmpeg, reframe_clip_timeline_ffmpeg
+from afterform.flows.long_to_shorts.run_ledger import RunLedger
 from afterform.flows.long_to_shorts.video_cache import (
     extract_youtube_video_id,
     ingest_complete,
@@ -356,6 +357,8 @@ def run_pipeline(config: PipelineConfig) -> list[Path]:
     logger.info("Stage window: %s -> %s", start_stage, stop_stage)
     logger.info("=" * 60)
 
+    ledger = RunLedger(config, start_stage=start_stage, stop_stage=stop_stage)
+
     state = (
         PipelineState(work_dir=config.work_dir)
         if start_stage == "ingest"
@@ -363,58 +366,102 @@ def run_pipeline(config: PipelineConfig) -> list[Path]:
     )
 
     final_outputs: list[Path] = []
+    try:
+        if start_stage == "ingest":
+            ledger.start_stage("ingest")
+            try:
+                state = _run_ingest_stage(config, state)
+            except Exception as exc:
+                ledger.fail_stage("ingest", exc)
+                raise
+            ledger.finish_stage("ingest")
+            _write_stage_inspection_if_requested(config, stage="ingest")
+            if stop_stage == "ingest":
+                ledger.finish_run(final_outputs)
+                return final_outputs
 
-    if start_stage == "ingest":
-        state = _run_ingest_stage(config, state)
-        _write_stage_inspection_if_requested(config, stage="ingest")
-        if stop_stage == "ingest":
-            return final_outputs
+        if start_stage in {"ingest", "clip-selection"}:
+            ledger.start_stage("clip-selection")
+            try:
+                state = _run_clip_selection_stage(config, state)
+            except Exception as exc:
+                ledger.fail_stage("clip-selection", exc)
+                raise
+            ledger.finish_stage("clip-selection")
+            _write_stage_inspection_if_requested(config, stage="clip-selection")
+            if stop_stage == "clip-selection":
+                ledger.finish_run(final_outputs)
+                return final_outputs
 
-    if start_stage in {"ingest", "clip-selection"}:
-        state = _run_clip_selection_stage(config, state)
-        _write_stage_inspection_if_requested(config, stage="clip-selection")
-        if stop_stage == "clip-selection":
-            return final_outputs
+        if start_stage in {"ingest", "clip-selection", "hook-detection"}:
+            ledger.start_stage("hook-detection")
+            try:
+                state = _run_hook_stage(config, state)
+            except Exception as exc:
+                ledger.fail_stage("hook-detection", exc)
+                raise
+            ledger.finish_stage("hook-detection")
+            _write_stage_inspection_if_requested(config, stage="hook-detection")
+            if stop_stage == "hook-detection":
+                ledger.finish_run(final_outputs)
+                return final_outputs
 
-    if start_stage in {"ingest", "clip-selection", "hook-detection"}:
-        state = _run_hook_stage(config, state)
-        _write_stage_inspection_if_requested(config, stage="hook-detection")
-        if stop_stage == "hook-detection":
-            return final_outputs
+        if start_stage in {"ingest", "clip-selection", "hook-detection", "content-pruning"}:
+            ledger.start_stage("content-pruning")
+            try:
+                state = _run_pruning_stage(config, state)
+            except Exception as exc:
+                ledger.fail_stage("content-pruning", exc)
+                raise
+            ledger.finish_stage("content-pruning")
+            _write_stage_inspection_if_requested(config, stage="content-pruning")
+            if stop_stage == "content-pruning":
+                ledger.finish_run(final_outputs)
+                return final_outputs
 
-    if start_stage in {"ingest", "clip-selection", "hook-detection", "content-pruning"}:
-        state = _run_pruning_stage(config, state)
-        _write_stage_inspection_if_requested(config, stage="content-pruning")
-        if stop_stage == "content-pruning":
-            return final_outputs
+        if start_stage in {
+            "ingest",
+            "clip-selection",
+            "hook-detection",
+            "content-pruning",
+            "layout-vision",
+        }:
+            ledger.start_stage("layout-vision")
+            try:
+                state = _run_layout_stage(config, state)
+            except Exception as exc:
+                ledger.fail_stage("layout-vision", exc)
+                raise
+            ledger.finish_stage("layout-vision")
+            _write_stage_inspection_if_requested(config, stage="layout-vision")
+            if stop_stage == "layout-vision":
+                ledger.finish_run(final_outputs)
+                return final_outputs
 
-    if start_stage in {
-        "ingest",
-        "clip-selection",
-        "hook-detection",
-        "content-pruning",
-        "layout-vision",
-    }:
-        state = _run_layout_stage(config, state)
-        _write_stage_inspection_if_requested(config, stage="layout-vision")
-        if stop_stage == "layout-vision":
-            return final_outputs
-
-    if start_stage in {
-        "ingest",
-        "clip-selection",
-        "hook-detection",
-        "content-pruning",
-        "layout-vision",
-        "render",
-    }:
-        final_outputs = _run_render_stage(config, state)
-        _write_stage_inspection_if_requested(config, stage="render")
+        if start_stage in {
+            "ingest",
+            "clip-selection",
+            "hook-detection",
+            "content-pruning",
+            "layout-vision",
+            "render",
+        }:
+            ledger.start_stage("render")
+            try:
+                final_outputs = _run_render_stage(config, state)
+            except Exception as exc:
+                ledger.fail_stage("render", exc)
+                raise
+            ledger.finish_stage("render", extra_artifacts=[str(p) for p in final_outputs])
+            _write_stage_inspection_if_requested(config, stage="render")
+    except Exception:
+        raise
 
     logger.info("=" * 60)
     logger.info("PIPELINE COMPLETE - %d shorts generated:", len(final_outputs))
     for p in final_outputs:
         logger.info("  -> %s", p)
     logger.info("=" * 60)
+    ledger.finish_run(final_outputs)
     return final_outputs
 

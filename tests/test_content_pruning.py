@@ -85,6 +85,7 @@ def cfg(tmp_path: Path) -> PipelineConfig:
         work_dir=tmp_path,
         gemini_model="gemini-test",
         prune_level="balanced",
+        filled_pause_pruning=False,
     )
 
 

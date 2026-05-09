@@ -66,7 +66,7 @@ Cache layout:
 
 - per-video work dir: `<cache_root>/videos/<11-char-video-id>/`
 - global manifest: `<cache_root>/video_cache_manifest.json`
-- `--no-video-cache`: use `./.afterform_work` unless `--work-dir` is set
+- `--no-video-cache`: use the isolated run work dir unless `--work-dir` is set
 
 ## CLI cross-reference
 
@@ -117,6 +117,7 @@ Preferred pattern:
 
 - one run folder per attempt
 - `--run-dir` for the parent folder
+- URL runs without `--run-dir`, `--work-dir`, or `--output` auto-create `.afterform/runs/<run_id>/`
 - `gpt-5.4` as the default Azure text and vision model unless there is a measured
   reason to pay for `gpt-5.5`
 
@@ -124,7 +125,7 @@ Example:
 
 ```bash
 uv run afterform run long-to-shorts "<youtube_url>" \
-  --run-dir ".afterform_runs/yt_20260508_093000" \
+  --run-dir ".afterform/runs/yt_20260508_093000" \
   --llm-provider azure \
   --llm-model gpt-5.4 \
   --llm-vision-model gpt-5.4
@@ -132,15 +133,17 @@ uv run afterform run long-to-shorts "<youtube_url>" \
 
 This expands to:
 
-- work dir: `.afterform_runs/yt_20260508_093000/work`
-- output dir: `.afterform_runs/yt_20260508_093000/output`
+- work dir: `.afterform/runs/yt_20260508_093000/work`
+- output dir: `.afterform/runs/yt_20260508_093000/output`
+- run record: `.afterform/runs/yt_20260508_093000/run.json`
+- frozen config: `.afterform/runs/yt_20260508_093000/config.json`
 
 Resume pattern:
 
 ```bash
 uv run afterform run long-to-shorts \
-  --work-dir ".afterform_runs/yt_20260508_093000/work" \
-  --output ".afterform_runs/yt_20260508_093000/output" \
+  --work-dir ".afterform/runs/yt_20260508_093000/work" \
+  --output ".afterform/runs/yt_20260508_093000/output" \
   --start-at layout-vision \
   --llm-provider azure \
   --llm-model gpt-5.4 \
