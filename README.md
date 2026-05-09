@@ -78,7 +78,7 @@ Recommended pattern for real work:
 
 ```bash
 uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=4SlNgM4PjvQ" \
-  --run-dir ".afterform_runs/yt_20260508_093000" \
+  --run-dir ".afterform/runs/yt_20260508_093000" \
   --llm-provider azure \
   --llm-model gpt-5.4 \
   --llm-vision-model gpt-5.4 \
@@ -86,7 +86,7 @@ uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=4SlNgM4PjvQ
 ```
 
 ```powershell
-uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=4SlNgM4PjvQ" --run-dir ".afterform_runs/waterloo-sam-altman" --llm-provider azure --llm-model gpt-5.4 --llm-vision-model gpt-5.4 --verbose
+uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=4SlNgM4PjvQ" --run-dir ".afterform/runs/waterloo-sam-altman" --llm-provider azure --llm-model gpt-5.4 --llm-vision-model gpt-5.4 --verbose
 
 ```
 
@@ -94,10 +94,11 @@ What `--run-dir` does:
 
 - writes intermediates to `<run-dir>/work`
 - writes final shorts to `<run-dir>/output`
+- writes run tracking to `<run-dir>/run.json` and `<run-dir>/config.json`
 
 Why this matters:
 
-- default output is `./output`
+- default URL runs now create `.afterform/runs/<run_id>/`
 - `--clean-run` enables output overwrite behavior
 - reusing one folder makes it easy to lose track of partial progress
 
@@ -105,8 +106,8 @@ Resume an interrupted run from cached artifacts:
 
 ```bash
 uv run afterform run long-to-shorts \
-  --work-dir ".afterform_runs/yt_20260508_093000/work" \
-  --output ".afterform_runs/yt_20260508_093000/output" \
+  --work-dir ".afterform/runs/yt_20260508_093000/work" \
+  --output ".afterform/runs/yt_20260508_093000/output" \
   --start-at layout-vision \
   --llm-provider azure \
   --llm-model gpt-5.4 \
@@ -118,7 +119,7 @@ Useful variants:
 
 ```bash
 uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID" --clean-run --verbose
-uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID" --run-dir ".afterform_runs/yt_20260508_093000" --llm-provider azure --llm-model gpt-5.4 --llm-vision-model gpt-5.4
+uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID" --run-dir ".afterform/runs/yt_20260508_093000" --llm-provider azure --llm-model gpt-5.4 --llm-vision-model gpt-5.4
 uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID" --no-filled-pause-pruning
 uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID" --require-filled-pause-pruning
 uv run afterform --help
@@ -148,6 +149,9 @@ More flows can be added later without changing the package model.
 - [`docs/README.md`](docs/README.md)
 - [`docs/PIPELINE.md`](docs/PIPELINE.md)
 - [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
+- [`docs/long-to-shorts.md`](docs/long-to-shorts.md)
+- [`docs/SHARING.md`](docs/SHARING.md)
+- [`TERMINOLOGY.md`](TERMINOLOGY.md)
 
 ## Verify
 

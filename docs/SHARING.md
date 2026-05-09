@@ -1,11 +1,11 @@
 # Sharing this project with someone else
 
-Large binaries do not belong in git. `.gitignore` excludes **`output/`**, **`*.mp4`**, **`*.wav`**, and runtime work dirs. That is intentional.
+Large binaries do not belong in git. `.gitignore` excludes **`output/`**, **`.afterform/`**, **`*.mp4`**, **`*.wav`**, and runtime work dirs. That is intentional.
 
 ## What lives in the repo
 
 - Markdown in `docs/`
-- code in `src/contentflow/`
+- code in `src/afterform/`
 - tests in `tests/`
 
 ## Easiest ways to show work
@@ -18,5 +18,6 @@ Large binaries do not belong in git. `.gitignore` excludes **`output/`**, **`*.m
 ## What you cannot share via git alone
 
 - Final **`short_*.mp4`** files unless you remove ignore rules or use **GitHub Releases** or external storage.
+- Local run records under **`.afterform/runs/`** unless you copy the specific `run.json` or `config.json` into a tracked note.
 
 Use YouTube or Releases for MP4s; keep git for source and documentation.

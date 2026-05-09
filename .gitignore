@@ -40,6 +40,7 @@ keyframes/
 .afterform_work/
 .afterform_work_clean_*/
 .afterform_runs/
+.afterform/
 
 # IDE / OS
 .vscode/
