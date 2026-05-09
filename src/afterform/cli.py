@@ -42,8 +42,10 @@ def _sanitize_log_value(value: object, *, key: str | None = None) -> object:
             return _sanitize_log_value(value.model_dump(), key=key)
         except Exception:
             return repr(value)
-    if not isinstance(value, str):
+    if value is None or isinstance(value, (bool, int, float)):
         return value
+    if not isinstance(value, str):
+        return repr(value)
 
     key_name = (key or "").lower()
     should_trim = (

@@ -220,3 +220,31 @@ def test_verbose_formatter_pretty_prints_and_trims_large_data_urls():
     assert image_url not in rendered
 
 
+def test_verbose_formatter_stringifies_nested_non_serializable_objects():
+    class NonSerializable:
+        def __repr__(self) -> str:
+            return "<NonSerializable>"
+
+    formatter = cli._PrettyJsonLogFormatter("%(message)s")
+    record = logging.LogRecord(
+        name="openai._base_client",
+        level=logging.DEBUG,
+        pathname=__file__,
+        lineno=1,
+        msg="Request options: %s",
+        args=(
+            {
+                "files": [("file", NonSerializable())],
+                "json_data": {"model": "whisper-1"},
+            },
+        ),
+        exc_info=None,
+    )
+
+    rendered = formatter.format(record)
+
+    assert "Request options: {\n" in rendered
+    assert '"files": [\n' in rendered
+    assert '"<NonSerializable>"' in rendered
+
+

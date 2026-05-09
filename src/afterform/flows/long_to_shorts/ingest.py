@@ -12,6 +12,8 @@ import logging
 import os
 import subprocess
 import sys
+import warnings
+from contextlib import contextmanager
 from math import ceil
 from pathlib import Path
 
@@ -20,6 +22,24 @@ logger = logging.getLogger(__name__)
 OPENAI_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 OPENAI_TARGET_UPLOAD_BYTES = 20 * 1024 * 1024
 OPENAI_MIN_CHUNK_SEC = 300.0
+
+
+@contextmanager
+def _suppress_known_whisperx_warnings():
+    lightning_logger = logging.getLogger("lightning.pytorch.utilities.migration.utils")
+    prior_level = lightning_logger.level
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"\ntorchcodec is not installed correctly so built-in audio decoding will fail\.",
+            category=UserWarning,
+            module=r"pyannote\.audio\.core\.io",
+        )
+        lightning_logger.setLevel(logging.WARNING)
+        try:
+            yield
+        finally:
+            lightning_logger.setLevel(prior_level)
 
 
 def _has_audio_stream(media_path: Path) -> bool:
@@ -106,21 +126,22 @@ def extract_audio(video_path: Path, output_dir: Path) -> Path:
 
 def _transcribe_whisperx_local(audio_path: Path) -> dict:
     """Word-level transcript via WhisperX (local). Raises ImportError if not installed."""
-    import whisperx
+    with _suppress_known_whisperx_warnings():
+        import whisperx
 
-    logger.info("Transcribing with WhisperX...")
-    device = "cpu"  # Use "cuda" if GPU available
-    model = whisperx.load_model("base", device=device, compute_type="int8")
-    audio = whisperx.load_audio(str(audio_path))
-    result = model.transcribe(audio, batch_size=16)
+        logger.info("Transcribing with WhisperX...")
+        device = "cpu"  # Use "cuda" if GPU available
+        model = whisperx.load_model("base", device=device, compute_type="int8")
+        audio = whisperx.load_audio(str(audio_path))
+        result = model.transcribe(audio, batch_size=16)
 
-    align_model, metadata = whisperx.load_align_model(
-        language_code=result["language"], device=device
-    )
-    result = whisperx.align(
-        result["segments"], align_model, metadata, audio, device,
-        return_char_alignments=False,
-    )
+        align_model, metadata = whisperx.load_align_model(
+            language_code=result["language"], device=device
+        )
+        result = whisperx.align(
+            result["segments"], align_model, metadata, audio, device,
+            return_char_alignments=False,
+        )
 
     logger.info("Transcription complete: %d segments", len(result["segments"]))
     return result
