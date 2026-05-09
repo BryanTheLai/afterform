@@ -82,7 +82,7 @@ Cache layout:
 | `--review-only-clips` | explicit CLI only |
 | `--cache-root` | `AFTERFORM_CACHE_ROOT` |
 | `--work-dir` | explicit intermediate-artifact directory |
-| `--run-dir` | expands to `<run-dir>/work` and `<run-dir>/output` |
+| `--run-dir` | expands to `<run-dir>/work`, `<run-dir>/output`, `<run-dir>/run.json`, and `<run-dir>/config.json` |
 | `--no-video-cache` | disables per-video cache dirs |
 | `--force-clip-selection` | bypasses clip-selection cache |
 | `--force-hook-detection` | bypasses hook-detection cache |

@@ -16,11 +16,13 @@ YouTube URL
   -> Stage 4    render
 ```
 
-Default work directory:
+Default run layout:
 
-- `<AFTERFORM_CACHE_ROOT>/videos/<video_id>/`
-- or `./.afterform_work` when `--no-video-cache` is set
-- or `--work-dir` when provided
+- default URL runs create `.afterform/runs/<run_id>/`
+- per-video cached intermediates live under `<AFTERFORM_CACHE_ROOT>/videos/<video_id>/`
+- `--no-video-cache` uses `.afterform/runs/<run_id>/work` unless `--work-dir` is set
+- `--run-dir <dir>` expands to `<dir>/work`, `<dir>/output`, `<dir>/run.json`, and `<dir>/config.json`
+- `--work-dir` uses the provided intermediate-artifact directory
 
 ## Stage 1: Ingest
 
@@ -142,7 +144,7 @@ Behavior:
 
 Goal:
 
-- `output/short_<clip_id>.mp4`
+- `<output-dir>/short_<clip_id>.mp4`
 
 Main modules:
 
@@ -198,6 +200,20 @@ The reusable deterministic building blocks live in:
 | `--no-hook-detection` | `detect_hooks=False` |
 | `--prune-level` | `prune_level` |
 | `--work-dir` | `work_dir` |
+| `--run-dir` | `run_dir`, `work_dir=<run-dir>/work`, `output_dir=<run-dir>/output` |
+| `--output` | `output_dir` |
+| `--no-video-cache` | `use_video_cache=False` |
+| `--clean-run` | `clean_run=True`, no video cache, force stage recompute, overwrite outputs |
 | `--cache-root` | `cache_root` |
 | `--start-at`, `--stop-after` | stage window |
 | `--inspect-stage`, `--clip-id` | inspection output |
+
+## Run record
+
+Each tracked run writes:
+
+- `<run-dir>/run.json` - run status, stage statuses, errors, artifact paths, and outputs
+- `<run-dir>/config.json` - frozen runtime configuration for that attempt
+
+When `--work-dir` is used without `--run-dir`, the work directory itself becomes
+the run-record root.

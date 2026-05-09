@@ -192,6 +192,12 @@ A per-video cache directory holding everything intermediate: the
 downloaded `source.mp4`, `transcript.json`, `clips.json`, keyframes,
 `layout_vision.json`, subtitles, etc. Lets us re-run cheaply.
 
+### Run dir
+A per-attempt directory holding one execution's outputs and run record.
+By default, URL runs create `.afterform/runs/<run_id>/`. A run dir
+contains `output/`, `run.json`, and `config.json`; when cache reuse is
+disabled, it also contains `work/`.
+
 ---
 
 ## Pipeline stage vocabulary

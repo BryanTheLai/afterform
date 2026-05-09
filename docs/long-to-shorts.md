@@ -10,8 +10,9 @@ status: draft
 
 **CLI:** `uv run afterform run long-to-shorts "<youtube_url>"` (see repo root [`README.md`](../README.md) for install and flags).
 
-**Recommended invocation:** use `--run-dir` so every run gets its own `work/` and
-`output/` folders, and use Azure `gpt-5.4` as the default cost/performance path.
+**Recommended invocation:** use `--run-dir` so every run gets its own `work/`,
+`output/`, `run.json`, and `config.json`, and use Azure `gpt-5.4` as the default
+cost/performance path.
 
 **How it works (one sentence):** Download + transcript -> structured clip selection -> hook detection -> content pruning -> layout planning -> ffmpeg render.
 

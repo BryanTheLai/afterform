@@ -149,6 +149,9 @@ More flows can be added later without changing the package model.
 - [`docs/README.md`](docs/README.md)
 - [`docs/PIPELINE.md`](docs/PIPELINE.md)
 - [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
+- [`docs/long-to-shorts.md`](docs/long-to-shorts.md)
+- [`docs/SHARING.md`](docs/SHARING.md)
+- [`TERMINOLOGY.md`](TERMINOLOGY.md)
 
 ## Verify
 
