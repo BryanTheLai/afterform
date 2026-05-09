@@ -4,6 +4,7 @@ from afterform.flows.long_to_shorts.ingest import (
     _merge_transcripts,
     _offset_transcript_timestamps,
     _plan_openai_chunk_ranges,
+    _suppress_known_whisperx_warnings,
     transcribe_whisperx,
 )
 
@@ -67,4 +68,43 @@ def test_transcribe_provider_openai_calls_openai_api(monkeypatch, tmp_path):
     m.assert_called_once_with(audio)
     assert r == out
     assert (tmp_path / "transcript.json").read_text(encoding="utf-8").strip()
+
+
+def test_suppress_known_whisperx_warnings_filters_only_expected_noise():
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with _suppress_known_whisperx_warnings():
+            warnings.warn_explicit(
+                "\ntorchcodec is not installed correctly so built-in audio decoding will fail.",
+                UserWarning,
+                filename="pyannote/audio/core/io.py",
+                lineno=47,
+                module="pyannote.audio.core.io",
+            )
+            warnings.warn_explicit(
+                "keep this warning visible",
+                UserWarning,
+                filename="tests/test_ingest_openai_chunks.py",
+                lineno=1,
+                module="tests.test_ingest_openai_chunks",
+            )
+
+    assert [str(w.message) for w in caught] == ["keep this warning visible"]
+
+
+def test_suppress_known_whisperx_warnings_restores_lightning_logger_level():
+    import logging
+
+    logger = logging.getLogger("lightning.pytorch.utilities.migration.utils")
+    original_level = logger.level
+    logger.setLevel(logging.INFO)
+
+    try:
+        with _suppress_known_whisperx_warnings():
+            assert logger.level == logging.WARNING
+        assert logger.level == logging.INFO
+    finally:
+        logger.setLevel(original_level)
 
