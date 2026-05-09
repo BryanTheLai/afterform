@@ -10,15 +10,14 @@ status: draft
 
 **CLI:** `uv run afterform run long-to-shorts "<youtube_url>"` (see repo root [`README.md`](../README.md) for install and flags).
 
+**Recommended invocation:** use `--run-dir` so every run gets its own `work/` and
+`output/` folders, and use Azure `gpt-5.4` as the default cost/performance path.
+
 **How it works (one sentence):** Download + transcript -> structured clip selection -> hook detection -> content pruning -> layout planning -> ffmpeg render.
 
 **Canonical detail:** [`docs/PIPELINE.md`](PIPELINE.md) - stages, caches, artifacts, and config mapping.
 
 **Terminology:** [`TERMINOLOGY.md`](../TERMINOLOGY.md) - time window vs crop/layout.
-
-**Current gaps:** [`docs/PROJECT_ISSUES.md`](PROJECT_ISSUES.md).
-
-**Prompt/runtime caveats:** [`docs/KNOWN_LIMITATIONS_AND_PROMPT_CONTRACT_GAP.md`](KNOWN_LIMITATIONS_AND_PROMPT_CONTRACT_GAP.md).
 
 **Why the name is `long-to-shorts`:** this flow is about transforming a long source into multiple short outputs. That is precise today and does not box future flows into podcasts.
 

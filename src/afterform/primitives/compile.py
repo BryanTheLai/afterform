@@ -17,7 +17,8 @@ Rendering order is fixed and intentional:
    to the output resolution so libass coordinate math (MarginV, FontSize)
    is in *output pixels*, not libass's default PlayResY=288 — which was
    the bug behind the "subtitles blocked / floating in the middle" look.
-4. **Mux** with the source audio stream (``0:a:0``).
+4. **Mux** with normalized source audio so quiet source uploads do not render
+   as effectively muted shorts.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ..schemas import SPLIT_LAYOUTS, RenderRequest, RenderResult
+from ..schemas import SPLIT_LAYOUTS, LayoutKind, RenderRequest, RenderResult
 from .layouts import plan_layout
 
 
@@ -84,6 +85,7 @@ _TITLE_LINE_SPACING_RATIO = 1.3
 # sync with the ``Fontname=Arial`` in the subtitle filter if it ever
 # changes.
 _TITLE_FONT_NAME = "Arial"
+_AUDIO_GAIN_FILTER = "volume=8dB,alimiter=limit=0.95,aresample=44100"
 
 
 def _title_char_px(size_px: int) -> float:
@@ -210,6 +212,7 @@ def _has_audio_stream(media_path: str) -> bool:
 def _build_concat_prefix(
     keep_ranges: list[tuple[float, float]],
     *,
+    base_start_sec: float = 0.0,
     include_audio: bool,
 ) -> tuple[str, str, str | None]:
     video_parts: list[str] = []
@@ -217,15 +220,17 @@ def _build_concat_prefix(
     concat_inputs: list[str] = []
 
     for idx, (start, end) in enumerate(keep_ranges):
+        abs_start = base_start_sec + start
+        abs_end = base_start_sec + end
         video_label = f"v{idx}"
         video_parts.append(
-            f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[{video_label}]"
+            f"[0:v]trim=start={abs_start:.3f}:end={abs_end:.3f},setpts=PTS-STARTPTS[{video_label}]"
         )
         concat_inputs.append(f"[{video_label}]")
         if include_audio:
             audio_label = f"a{idx}"
             audio_parts.append(
-                f"[0:a:0]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[{audio_label}]"
+                f"[0:a:0]atrim=start={abs_start:.3f}:end={abs_end:.3f},asetpts=PTS-STARTPTS[{audio_label}]"
             )
             concat_inputs.append(f"[{audio_label}]")
 
@@ -253,6 +258,7 @@ def build_ffmpeg_cmd(
     if use_concat:
         prefix, input_label, audio_label = _build_concat_prefix(
             list(req.clip.keep_ranges_sec),
+            base_start_sec=req.clip.start_time_sec,
             include_audio=include_audio,
         )
 
@@ -265,12 +271,17 @@ def build_ffmpeg_cmd(
         input_label=input_label,
     )
     fg = plan.filtergraph if not prefix else f"{prefix};{plan.filtergraph}"
+    normalized_audio_label: str | None = None
+    if include_audio:
+        audio_input = f"[{audio_label}]" if audio_label is not None else "[0:a:0]"
+        normalized_audio_label = "aout"
+        fg = f"{fg};{audio_input}{_AUDIO_GAIN_FILTER}[{normalized_audio_label}]"
 
     # Skip the drawtext title overlay on split layouts: the top band already
     # shows a slide/chart with its own baked-in title, so adding an overlay
     # on top of that is pure noise (and was stacking over the chart title
     # in the SPLIT_CHART_PERSON Cathy Wood shorts).
-    title_allowed = req.layout.layout not in SPLIT_LAYOUTS
+    title_allowed = req.layout.layout not in SPLIT_LAYOUTS and req.layout.layout != LayoutKind.WIDE_VISUAL
     if req.title_text and title_allowed:
         # ``plan_title_drawtext`` returns a full filter fragment (possibly
         # two chained ``drawtext`` calls) that fits within the output width.
@@ -310,32 +321,31 @@ def build_ffmpeg_cmd(
 
     Path(Path(req.output_path).parent).mkdir(parents=True, exist_ok=True)
 
-    cmd: list[str] = [
-        exe,
-        "-y",
-        "-ss",
-        f"{start:.3f}",
-        "-t",
-        f"{dur:.3f}",
-        "-i",
-        req.source_path,
-        "-filter_complex",
-        fg,
-        "-map",
-        "[vout]",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "20",
-    ]
+    cmd: list[str] = [exe, "-y"]
+    if not use_concat:
+        cmd.extend(["-ss", f"{start:.3f}", "-t", f"{dur:.3f}"])
+    cmd.extend(
+        [
+            "-i",
+            req.source_path,
+            "-filter_complex",
+            fg,
+            "-map",
+            "[vout]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+        ]
+    )
 
     if include_audio:
         cmd.extend(
             [
                 "-map",
-                f"[{audio_label}]" if audio_label is not None else "0:a:0",
+                f"[{normalized_audio_label}]",
                 "-c:a",
                 "aac",
                 "-b:a",

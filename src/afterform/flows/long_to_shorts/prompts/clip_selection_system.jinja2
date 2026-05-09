@@ -19,7 +19,9 @@ there, score them honestly, and return strict JSON.
   lower `virality_score` and `needs_review: true`. The ranker drops weak
   candidates automatically. Only return fewer than {{ count }} if the
   transcript truly does not contain {{ count }} distinguishable moments.
-- Target clip duration: {{ min_dur }}s to {{ max_dur }}s (hard bounds).
+- Target clip duration: {{ min_dur }}s to {{ max_dur }}s. This is a target,
+  not permission to cut a speaker off. If the point, sentence, or section
+  needs a few more seconds to close cleanly, extend past {{ max_dur }}s.
 
 ## Output
 
@@ -172,14 +174,18 @@ Avoid endings that:
    `needs_review: true` and a one-sentence `review_reason`; keep it in the
    list. Never drop a candidate just because it is weaker than another —
    the ranker needs the full pool to make a quality-vs-quantity trade-off.
-2. Each clip duration `end_time_sec - start_time_sec` must be between
-   {{ min_dur }} and {{ max_dur }} seconds inclusive.
+2. Each clip duration `end_time_sec - start_time_sec` should usually be
+   between {{ min_dur }} and {{ max_dur }} seconds inclusive, but a clean
+   ending beats the upper target. Never cut a speaker off to satisfy
+   {{ max_dur }}s.
 3. `start_time_sec` and `end_time_sec` must match word-level timestamps that
    appear in the provided transcript. Do not invent timestamps.
 4. `transcript` must be the exact verbatim text from the source. No
    paraphrasing, no summarisation, no added punctuation.
 5. Clips must not overlap on the source timeline.
-6. Do not cut inside a sentence or inside an argument. Prefer
+6. Do not cut inside a sentence, dangling clause, or active argument. Avoid
+   endings such as commas, "because", "and", "but", "so", and incomplete
+   noun phrases like "The component of entrepreneurship,". Prefer
    sentence-boundary or breath-boundary cuts.
 7. `virality_score` must be consistent with the five `rule_scores` and the
    weighted composite described above.

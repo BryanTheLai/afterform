@@ -45,6 +45,77 @@ wheels = [
 ]
 
 [[package]]
+name = "afterform"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "google-genai" },
+    { name = "jinja2" },
+    { name = "mcp", extra = ["cli"] },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "openai" },
+    { name = "opencv-python" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "scenedetect" },
+    { name = "tqdm" },
+    { name = "yt-dlp" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pillow" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+face = [
+    { name = "mediapipe" },
+]
+filled-pause = [
+    { name = "torch", version = "2.8.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.8.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "platform_machine != 'x86_64' and sys_platform != 'darwin'" },
+    { name = "torch", version = "2.8.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "platform_machine == 'x86_64' and sys_platform != 'darwin'" },
+    { name = "transformers" },
+]
+transcribe = [
+    { name = "faster-whisper" },
+]
+vision = [
+    { name = "pillow" },
+]
+whisper = [
+    { name = "whisperx" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "faster-whisper", marker = "extra == 'transcribe'", specifier = ">=1.0" },
+    { name = "google-genai", specifier = ">=1.0" },
+    { name = "jinja2", specifier = ">=3.1" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.2.0" },
+    { name = "mediapipe", marker = "extra == 'face'", specifier = ">=0.10" },
+    { name = "numpy", specifier = ">=1.24" },
+    { name = "openai", specifier = ">=1.0" },
+    { name = "opencv-python", specifier = ">=4.8" },
+    { name = "pillow", marker = "extra == 'dev'", specifier = ">=10.0" },
+    { name = "pillow", marker = "extra == 'vision'", specifier = ">=10.0" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "scenedetect", specifier = ">=0.6" },
+    { name = "torch", marker = "extra == 'filled-pause'", specifier = ">=2.0" },
+    { name = "tqdm", specifier = ">=4.60" },
+    { name = "transformers", marker = "extra == 'filled-pause'", specifier = ">=4.40" },
+    { name = "whisperx", marker = "extra == 'whisper'", git = "https://github.com/m-bain/whisperX.git" },
+    { name = "yt-dlp", specifier = ">=2024.0" },
+]
+provides-extras = ["dev", "whisper", "transcribe", "face", "vision", "filled-pause"]
+
+[[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -542,69 +613,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/a2/61/f083b5ac52e505dfc
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6d/c1/e419ef3723a074172b68aaa89c9f3de486ed4c2399e2dbd8113a4fdcaf9e/colorlog-6.10.1-py3-none-any.whl", hash = "sha256:2d7e8348291948af66122cff006c9f8da6255d224e7cf8e37d8de2df3bad8c9c", size = 11743, upload-time = "2025-10-16T16:14:10.512Z" },
 ]
-
-[[package]]
-name = "afterform"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "google-genai" },
-    { name = "jinja2" },
-    { name = "mcp", extra = ["cli"] },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "openai" },
-    { name = "opencv-python" },
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "scenedetect" },
-    { name = "tqdm" },
-    { name = "yt-dlp" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pillow" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-face = [
-    { name = "mediapipe" },
-]
-transcribe = [
-    { name = "faster-whisper" },
-]
-vision = [
-    { name = "pillow" },
-]
-whisper = [
-    { name = "whisperx" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "faster-whisper", marker = "extra == 'transcribe'", specifier = ">=1.0" },
-    { name = "google-genai", specifier = ">=1.0" },
-    { name = "jinja2", specifier = ">=3.1" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.2.0" },
-    { name = "mediapipe", marker = "extra == 'face'", specifier = ">=0.10" },
-    { name = "numpy", specifier = ">=1.24" },
-    { name = "openai", specifier = ">=1.0" },
-    { name = "opencv-python", specifier = ">=4.8" },
-    { name = "pillow", marker = "extra == 'dev'", specifier = ">=10.0" },
-    { name = "pillow", marker = "extra == 'vision'", specifier = ">=10.0" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'dev'" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "ruff", marker = "extra == 'dev'" },
-    { name = "scenedetect", specifier = ">=0.6" },
-    { name = "tqdm", specifier = ">=4.60" },
-    { name = "whisperx", marker = "extra == 'whisper'", git = "https://github.com/m-bain/whisperX.git" },
-    { name = "yt-dlp", specifier = ">=2024.0" },
-]
-provides-extras = ["dev", "whisper", "transcribe", "face", "vision"]
 
 [[package]]
 name = "contourpy"

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from afterform.primitives.compile import build_ffmpeg_cmd
-from afterform.schemas import Clip, LayoutInstruction, LayoutKind, RenderRequest
+from afterform.schemas import Clip, ClipLayoutPlan, LayoutInstruction, LayoutKind, RenderRequest
 
 from afterform.flows.long_to_shorts.clip_selection_cache import transcript_fingerprint
 from afterform.flows.long_to_shorts.select_clips import load_clips
@@ -48,7 +48,7 @@ class PipelineState:
     transcript: dict[str, Any] | None = None
     transcript_fp: str | None = None
     clips: list[Clip] | None = None
-    layout_instructions: dict[str, LayoutInstruction] | None = None
+    layout_instructions: dict[str, ClipLayoutPlan] | None = None
 
 
 def normalize_stage(stage: str | None) -> StageName | None:
@@ -198,16 +198,16 @@ def _apply_prune_artifact(work_dir: Path, clips: list[Clip]) -> list[Clip]:
     return out
 
 
-def _load_layout_instructions(work_dir: Path) -> dict[str, LayoutInstruction]:
+def _load_layout_instructions(work_dir: Path) -> dict[str, ClipLayoutPlan]:
     data = _read_json(artifact_paths(work_dir)["layout_vision"], label="layout_vision.json")
     clips = data.get("clips")
     if not isinstance(clips, dict):
         raise StageArtifactError("layout_vision.json is missing the top-level 'clips' object")
-    out: dict[str, LayoutInstruction] = {}
+    out: dict[str, ClipLayoutPlan] = {}
     for clip_id, payload in clips.items():
         if not isinstance(payload, dict) or "instruction" not in payload:
             continue
-        out[str(clip_id)] = LayoutInstruction.model_validate(payload["instruction"])
+        out[str(clip_id)] = ClipLayoutPlan.from_layout_cache_payload(str(clip_id), payload)
     return out
 
 
@@ -373,10 +373,12 @@ def build_stage_inspection(
     layout_instructions = _load_layout_instructions(work_dir)
     subtitle_payload: list[dict[str, Any]] = []
     for clip in render_clips:
-        instr = layout_instructions.get(clip.clip_id)
-        if instr is None:
+        layout_plan = layout_instructions.get(clip.clip_id)
+        if layout_plan is None:
             hint = clip.layout_hint or LayoutKind.SIT_CENTER
             instr = LayoutInstruction(clip_id=clip.clip_id, layout=hint)
+        else:
+            instr = layout_plan.instruction
         clip.layout = instr.layout
         aligned = clip_subtitle_words(transcript, clip)
         lines = clip_words_to_srt_lines(

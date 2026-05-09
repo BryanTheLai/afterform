@@ -14,7 +14,12 @@ Covers the "over-generate -> threshold with a floor" policy:
 
 from __future__ import annotations
 
-from afterform.flows.long_to_shorts.select_clips import build_prompt, rank_and_filter_clips
+from afterform.flows.long_to_shorts.select_clips import (
+    build_prompt,
+    dedupe_clips,
+    filter_clip_candidates,
+    rank_and_filter_clips,
+)
 from afterform.schemas import Clip
 
 
@@ -25,6 +30,8 @@ def _clip(
     start: float = 0.0,
     needs_review: bool = False,
     topic: str = "t",
+    transcript: str = "",
+    viral_hook: str = "",
 ) -> Clip:
     # Give each clip a unique, legal window. Score is the only field these
     # tests care about beyond needs_review / clip_id.
@@ -36,6 +43,8 @@ def _clip(
             "end_time_sec": start + 60.0,
             "virality_score": score,
             "needs_review": needs_review,
+            "transcript": transcript,
+            "viral_hook": viral_hook,
         }
     )
 
@@ -158,4 +167,89 @@ def test_clip_ids_are_renumbered_in_rank_order():
     )
     assert [c.clip_id for c in kept] == ["001", "002", "003"]
     assert [c.virality_score for c in kept] == [0.90, 0.70, 0.50]
+
+
+def test_exhaustive_mode_keeps_all_quality_clips_without_cap():
+    candidates = [
+        _clip(f"c{i}", score=0.80, start=i * 100, topic=f"topic {i}")
+        for i in range(12)
+    ]
+    kept = rank_and_filter_clips(
+        candidates,
+        threshold=0.70,
+        min_kept=5,
+        max_kept=None,
+        mode="exhaustive",
+    )
+    assert len(kept) == 12
+    assert [c.clip_id for c in kept] == [f"{i:03d}" for i in range(1, 13)]
+
+
+def test_exhaustive_mode_does_not_backfill_weak_clips():
+    candidates = [
+        _clip("a", score=0.69, topic="weak a"),
+        _clip("b", score=0.60, start=100, topic="weak b"),
+        _clip("c", score=0.80, start=200, topic="strong"),
+    ]
+    kept = rank_and_filter_clips(
+        candidates,
+        threshold=0.70,
+        min_kept=5,
+        max_kept=None,
+        mode="exhaustive",
+    )
+    assert len(kept) == 1
+    assert kept[0].topic == "strong"
+
+
+def test_dedupe_drops_overlapping_lower_score_clip():
+    candidates = [
+        _clip("winner", score=0.90, start=0, topic="ai jobs"),
+        _clip("loser", score=0.82, start=5, topic="ai jobs different"),
+    ]
+    kept, decisions = dedupe_clips(candidates)
+    assert [c.clip_id for c in kept] == ["winner"]
+    assert len(decisions) == 1
+    assert decisions[0].reason == "time_overlap"
+    assert decisions[0].kept_clip_id == "winner"
+    assert decisions[0].dropped_clip_id == "loser"
+
+
+def test_dedupe_drops_same_hook_clip():
+    candidates = [
+        _clip(
+            "winner",
+            score=0.90,
+            start=0,
+            topic="model cost",
+            viral_hook="The real cost is not the model",
+        ),
+        _clip(
+            "loser",
+            score=0.82,
+            start=120,
+            topic="different topic",
+            viral_hook="The real cost is not the model",
+        ),
+    ]
+    kept, decisions = dedupe_clips(candidates)
+    assert [c.clip_id for c in kept] == ["winner"]
+    assert decisions[0].reason == "hook_similarity"
+
+
+def test_filter_returns_dedupe_report_decisions_with_renumbered_kept_id():
+    candidates = [
+        _clip("high", score=0.90, start=0, topic="a"),
+        _clip("duplicate", score=0.80, start=3, topic="b"),
+    ]
+    kept, decisions = filter_clip_candidates(
+        candidates,
+        threshold=0.70,
+        min_kept=1,
+        max_kept=None,
+        mode="exhaustive",
+    )
+    assert [c.clip_id for c in kept] == ["001"]
+    assert decisions[0].kept_clip_id == "001"
+    assert decisions[0].dropped_clip_id == "duplicate"
 

@@ -138,8 +138,7 @@ def test_default_split_is_even_50_50_bands():
     fg = plan_layout(instr, out_w=1080, out_h=1920).filtergraph
     # Each strip should scale to the same height (half of 1920).
     heights = re.findall(r"scale=1080:(\d+):force_original_aspect_ratio", fg)
-    assert len(heights) == 2
-    assert heights[0] == heights[1] == "960", f"expected even 960/960, got {heights}"
+    assert heights == ["960", "960", "960"], heights
 
 
 def test_top_band_ratio_honored_for_uneven_splits():
@@ -148,7 +147,7 @@ def test_top_band_ratio_honored_for_uneven_splits():
     )
     fg = plan_layout(instr, out_w=1080, out_h=1920).filtergraph
     heights = re.findall(r"scale=1080:(\d+):force_original_aspect_ratio", fg)
-    assert heights == ["1152", "768"], heights
+    assert heights == ["1152", "1152", "768"], heights
 
 
 def test_split_seam_is_midpoint_between_bboxes():
@@ -168,8 +167,43 @@ def test_split_seam_is_midpoint_between_bboxes():
     assert bot_crop == "912:1080:1008:0"
 
 
-def test_split_uses_bbox_y_for_tight_band_fill():
-    """bbox y1/y2 constrains vertical crop so the chart fills its band."""
+def test_split_chart_person_handles_person_left_visual_right():
+    instr = LayoutInstruction(
+        clip_id="c",
+        layout=LayoutKind.SPLIT_CHART_PERSON,
+        split_person_region=BoundingBox(x1=0.0, y1=0.0, x2=0.50, y2=0.83),
+        split_chart_region=BoundingBox(x1=0.53, y1=0.2, x2=0.97, y2=0.82),
+    )
+
+    fg = plan_layout(instr, out_w=1080, out_h=1920, src_w=1920, src_h=1080).filtergraph
+
+    # Person-left / visual-right must put the visual crop on the right side
+    # and the person crop on the left side. The old code assumed chart-left.
+    assert "[src1]crop=932:" in fg
+    assert ":988:" in fg
+    assert "[src2]crop=988:" in fg
+    assert ":0:" in fg
+
+
+def test_split_chart_person_focuses_right_edge_person_bbox():
+    instr = LayoutInstruction(
+        clip_id="c",
+        layout=LayoutKind.SPLIT_CHART_PERSON,
+        split_chart_region=BoundingBox(x1=0.03, y1=0.39, x2=0.47, y2=0.67),
+        split_person_region=BoundingBox(x1=0.84, y1=0.05, x2=1.0, y2=0.72),
+    )
+
+    fg = plan_layout(instr, out_w=1080, out_h=1920, src_w=1920, src_h=1080).filtergraph
+
+    person_crop = re.search(r"\[src2\]crop=(\d+):(\d+):(\d+):(\d+)", fg)
+    assert person_crop is not None
+    person_x = int(person_crop.group(3))
+
+    assert person_x >= 1000
+
+
+def test_split_uses_full_side_pane_height_when_bboxes_define_both_sides():
+    """Side-by-side frames must not over-trust tight LLM face/photo bboxes."""
     instr = LayoutInstruction(
         clip_id="c",
         layout=LayoutKind.SPLIT_CHART_PERSON,
@@ -177,8 +211,22 @@ def test_split_uses_bbox_y_for_tight_band_fill():
         split_person_region=BoundingBox(x1=0.55, y1=0.0, x2=1.0, y2=1.0),
     )
     fg = plan_layout(instr, out_w=1080, out_h=1920, src_w=1920, src_h=1080).filtergraph
-    # Chart bbox y: 0.1..0.7 -> y=108 -> even=108, ch=0.6*1080=648.
-    assert "crop=1008:648:0:108" in fg
+    assert "crop=1008:1080:0:0" in fg
+
+
+def test_split_photo_insert_does_not_render_eye_only_crop():
+    instr = LayoutInstruction(
+        clip_id="c",
+        layout=LayoutKind.SPLIT_CHART_PERSON,
+        split_chart_region=BoundingBox(x1=0.053, y1=0.284, x2=0.458, y2=0.482),
+        split_person_region=BoundingBox(x1=0.5, y1=0.0, x2=1.0, y2=0.784),
+    )
+
+    fg = plan_layout(instr, out_w=1080, out_h=1920, src_w=1920, src_h=1080).filtergraph
+
+    assert "crop=918:1080:0:0" in fg
+    assert ":214:" not in fg
+    assert ":306:" not in fg
 
 
 def test_split_minimum_strip_width_enforced():
@@ -232,10 +280,13 @@ def test_split_two_persons_without_bboxes_defaults_to_centered():
     assert "[src2]crop=960:1080:960:0" in fg
 
 
-def test_split_bands_use_cover_scale_plus_center_crop():
-    """Each band is painted edge-to-edge -- no letterbox bars."""
+def test_split_visual_band_contains_and_person_band_covers():
+    """Visual inserts must stay readable; speaker crop can cover its band."""
     instr = LayoutInstruction(clip_id="c", layout=LayoutKind.SPLIT_CHART_PERSON)
     fg = plan_layout(instr, out_w=1080, out_h=1920, src_w=1920, src_h=1080).filtergraph
+    assert fg.count("force_original_aspect_ratio=decrease") == 1
+    assert "gblur=sigma=18" in fg
+    assert "overlay=(W-w)/2:(H-h)/2" in fg
     assert fg.count("force_original_aspect_ratio=increase") == 2
     assert fg.count("setsar=1") == 2
 
@@ -264,4 +315,44 @@ def test_zoom_tighter_means_smaller_crop_window():
     wcw, wch = crop(wide.filtergraph)
     tcw, tch = crop(tight.filtergraph)
     assert tcw < wcw and tch < wch
+
+
+def test_wide_visual_without_region_contains_source_without_center_crop():
+    instr = LayoutInstruction(clip_id="c", layout=LayoutKind.WIDE_VISUAL)
+    fg = plan_layout(instr, out_w=1080, out_h=1920, src_w=1920, src_h=1080).filtergraph
+
+    assert "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease" in fg
+    assert "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black" in fg
+
+
+def test_sit_center_zoom_out_contains_source_over_blur():
+    instr = LayoutInstruction(
+        clip_id="c",
+        layout=LayoutKind.SIT_CENTER,
+        zoom=0.85,
+        person_x_norm=0.45,
+    )
+    fg = plan_layout(instr, out_w=1080, out_h=1920, src_w=1920, src_h=1080).filtergraph
+
+    assert "[0:v]crop=1920:1080:0:0" in fg
+    assert "force_original_aspect_ratio=decrease" in fg
+    assert "force_original_aspect_ratio=increase" in fg
+    assert "gblur=sigma=18" in fg
+    assert "overlay=(W-w)/2:(H-h)/2" in fg
+
+
+def test_wide_visual_with_region_uses_readable_blur_contain():
+    instr = LayoutInstruction(
+        clip_id="c",
+        layout=LayoutKind.WIDE_VISUAL,
+        split_chart_region=BoundingBox(x1=0.07, y1=0.36, x2=0.93, y2=0.58),
+    )
+    fg = plan_layout(instr, out_w=1080, out_h=1920, src_w=1920, src_h=1080).filtergraph
+
+    assert "[0:v]crop=" in fg
+    assert "gblur=sigma=18" in fg
+    assert "overlay=(W-w)/2:(H-h)/2" in fg
+    assert "force_original_aspect_ratio=decrease" in fg
+    assert "force_original_aspect_ratio=increase" in fg
+    assert "pad=1080:1920" not in fg
 

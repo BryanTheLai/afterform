@@ -12,7 +12,14 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel, Field
 
-from afterform.schemas import BoundingBox, Clip, LayoutInstruction, LayoutKind
+from afterform.schemas import (
+    BoundingBox,
+    Clip,
+    ClipLayoutPlan,
+    LayoutInstruction,
+    LayoutKind,
+    LayoutTimelineSegment,
+)
 from afterform.primitives.vision import layout_instruction_from_regions
 from afterform.schemas import SceneClassification, SceneRegions
 
@@ -25,16 +32,21 @@ from afterform.providers.llm import (
     resolved_llm_provider,
     resolved_vision_model as resolved_provider_vision_model,
 )
-from afterform.flows.long_to_shorts.render_window import clip_for_render, clip_output_duration, source_keep_ranges
+from afterform.flows.long_to_shorts.render_window import (
+    apply_visual_drop_ranges,
+    clip_for_render,
+    clip_output_duration,
+    source_keep_ranges,
+)
 
 logger = logging.getLogger(__name__)
 
 LAYOUT_VISION_META = "layout_vision.meta.json"
 LAYOUT_VISION_JSON = "layout_vision.json"
-LAYOUT_VISION_META_VERSION = 3
-_LAYOUT_POLICY_VERSION = 3
-_MAX_SAMPLED_FRAMES = 6
-_COARSE_FRAME_STEP_SEC = 1.0
+LAYOUT_VISION_META_VERSION = 7
+_LAYOUT_POLICY_VERSION = 13
+_MAX_SAMPLED_FRAMES = 16
+_COARSE_FRAME_STEP_SEC = 0.5
 _VISION_HTTP_TIMEOUT_MS = 120_000
 _VISION_RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504]
 # Stage 3 requests are large multimodal calls. Blind immediate retries mainly turn
@@ -50,6 +62,14 @@ _SPLIT_TOP_RATIO_MAX = 0.48
 _SPLIT_FACE_REGION_MIN_HEIGHT = 0.62
 _SPLIT_FACE_REGION_HEIGHT_MULT = 2.0
 _SPLIT_FACE_TOP_PAD_MULT = 0.30
+_SIT_CENTER_CONTAIN_ZOOM = 0.85
+_SIT_CENTER_FACE_HEIGHT_CONTAIN_THRESHOLD = 0.38
+_SIT_CENTER_PERSON_WIDTH_CONTAIN_THRESHOLD = 0.44
+_SIT_CENTER_PERSON_HEIGHT_CONTAIN_THRESHOLD = 0.85
+_SIT_CENTER_FULL_HEIGHT_CONTAIN_THRESHOLD = 0.92
+_SIT_CENTER_EDGE_WIDTH_CONTAIN_THRESHOLD = 0.40
+_SIT_CENTER_GEOMETRY_X_TOLERANCE = 0.035
+_SIT_CENTER_GEOMETRY_ZOOM_TOLERANCE = 0.05
 
 GEMINI_LAYOUT_VISION_PROMPT = """You are framing a vertical short (9:16) from MULTIPLE keyframes of the same clip.
 
@@ -86,7 +106,10 @@ Rules:
 - Bboxes use Gemini's preferred 0..1000 coordinate scale. Require x2 > x1 and y2 > y1 for every non-null box.
 - person_bbox / second_person_bbox: tight box around each visible speaker's head and upper body.
 - face_bbox / second_face_bbox: tight box around the visible face only. No torso, shoulders, hands, mug, or chair.
-- chart_bbox / second_chart_bbox: slide, chart, graph, or large on-screen graphic.
+- chart_bbox / second_chart_bbox: any large visual insert that must stay readable:
+  slide, chart, graph, data visual, product screenshot, browser page, article screenshot,
+  photo/image panel, or large on-screen graphic. Use this field even when the visual is
+  not literally a chart.
 - If two speakers are visible, `person_bbox` is the LEFT speaker and `second_person_bbox` is the RIGHT speaker.
 - If two charts are visible, `chart_bbox` is the LEFT chart and `second_chart_bbox` is the RIGHT chart.
 - merged = one clip-level decision that best fits the dominant layout across the sampled frames. If the clip changes, pick the safest layout that keeps the primary subject(s) readable for most of the clip.
@@ -308,6 +331,57 @@ def _render_safe_split_person_region(
     return person.model_copy(update={"y1": top, "y2": bottom})
 
 
+def _expand_edge_clipped_split_person_region(
+    person: BoundingBox,
+    visual: BoundingBox,
+) -> BoundingBox | None:
+    """Recover a usable side pane when the LLM boxed only the speaker edge.
+
+    Some sources are clean left/right compositions, but the speaker is cropped
+    by the source frame. Vision can return a narrow bbox hugging the frame edge,
+    even though the whole side pane is still the right render target. In that
+    case, use the side-pane boundary for split math instead of falling back to a
+    visual-only layout.
+    """
+
+    if person.width > 0.24:
+        return None
+
+    if person.x2 >= 0.95 and visual.center_x < person.center_x:
+        available_pane_width = 1.0 - visual.x2
+        if available_pane_width >= _MIN_SPLIT_STRIP_FRAC:
+            return person.model_copy(update={"x1": visual.x2, "x2": 1.0})
+
+    if person.x1 <= 0.05 and visual.center_x > person.center_x:
+        available_pane_width = visual.x1
+        if available_pane_width >= _MIN_SPLIT_STRIP_FRAC:
+            return person.model_copy(update={"x1": 0.0, "x2": visual.x1})
+
+    return None
+
+
+def _sit_center_should_contain(person: BoundingBox | None, face: BoundingBox | None) -> bool:
+    if person is None:
+        return False
+
+    person_height = person.y2 - person.y1
+    face_height = (face.y2 - face.y1) if face is not None else 0.0
+    touches_edge = person.x1 <= 0.02 or person.x2 >= 0.98
+
+    if face_height >= _SIT_CENTER_FACE_HEIGHT_CONTAIN_THRESHOLD:
+        return True
+    if person_height >= _SIT_CENTER_FULL_HEIGHT_CONTAIN_THRESHOLD:
+        return True
+    if (
+        person.width >= _SIT_CENTER_PERSON_WIDTH_CONTAIN_THRESHOLD
+        and person_height >= _SIT_CENTER_PERSON_HEIGHT_CONTAIN_THRESHOLD
+    ):
+        return True
+    if touches_edge and person.width >= _SIT_CENTER_EDGE_WIDTH_CONTAIN_THRESHOLD:
+        return True
+    return False
+
+
 def _split_chart_person_top_band_ratio(
     chart: BoundingBox,
     person: BoundingBox,
@@ -395,6 +469,14 @@ def _instruction_from_gemini_json(
     if kind == LayoutKind.SPLIT_TWO_CHARTS and (cb is None or c2 is None):
         warnings.append("split_two_charts missing required boxes; downgraded to sit_center")
         kind = LayoutKind.SIT_CENTER
+    if kind == LayoutKind.SIT_CENTER and cb is not None and pb is not None:
+        visual_is_large = cb.width >= 0.32 and (cb.x2 <= pb.x1 or pb.x2 <= cb.x1)
+        if visual_is_large:
+            warnings.append("large visual and person bboxes; promoted to split_chart_person")
+            kind = LayoutKind.SPLIT_CHART_PERSON
+    if kind == LayoutKind.SIT_CENTER and cb is not None and pb is None and fb is None:
+        warnings.append("chart_bbox without person; promoted to wide_visual")
+        kind = LayoutKind.WIDE_VISUAL
 
     regions = SceneRegions(scene_id=scene_id, person_bbox=pb, chart_bbox=cb, raw_reason=reason)
     classification = SceneClassification(
@@ -412,12 +494,35 @@ def _instruction_from_gemini_json(
 
     if kind == LayoutKind.ZOOM_CALL_CENTER:
         updates["zoom"] = _subject_width_zoom(pb, fb)
+    if kind == LayoutKind.SIT_CENTER and pb is None and fb is None and cb is None:
+        warnings.append("sit_center missing subject bbox; using contained framing")
+        updates["zoom"] = _SIT_CENTER_CONTAIN_ZOOM
+    if kind == LayoutKind.SIT_CENTER and _sit_center_should_contain(pb, fb):
+        warnings.append("sit_center tight subject; using contained framing")
+        updates["zoom"] = _SIT_CENTER_CONTAIN_ZOOM
 
     if kind == LayoutKind.SPLIT_CHART_PERSON and pb is not None and cb is not None:
-        render_person = _render_safe_split_person_region(pb, fb)
+        edge_clipped_person = pb.width <= 0.24 and (pb.x1 <= 0.05 or pb.x2 >= 0.95)
+        expanded_person = (
+            _expand_edge_clipped_split_person_region(pb, cb) if edge_clipped_person else None
+        )
+        if expanded_person is not None:
+            warnings.append("edge-clipped speaker bbox expanded to side pane for split render")
+            render_person = _render_safe_split_person_region(expanded_person, fb)
+        elif cb.width >= 0.32 and edge_clipped_person:
+            warnings.append("edge-clipped speaker with large visual; promoted to wide_visual")
+            kind = LayoutKind.WIDE_VISUAL
+            updates["split_chart_region"] = cb
+            updates["layout"] = kind
+            instr = instr.model_copy(update=updates)
+            return instr
+        else:
+            render_person = _render_safe_split_person_region(pb, fb)
         updates["split_chart_region"] = cb
         updates["split_person_region"] = render_person
         updates["top_band_ratio"] = _split_chart_person_top_band_ratio(cb, render_person)
+    elif kind == LayoutKind.WIDE_VISUAL and cb is not None:
+        updates["split_chart_region"] = cb
     elif kind == LayoutKind.SPLIT_TWO_PERSONS and pb is not None and p2 is not None:
         left, right = sorted((pb, p2), key=lambda b: b.center_x)
         updates["split_person_region"] = left
@@ -471,10 +576,324 @@ def _uniform_source_timestamps(keep_ranges: list[tuple[float, float]], count: in
         return []
     if count == 1:
         return [_source_time_from_output_time(keep_ranges, total / 2.0)]
+    if count == 2:
+        return [
+            _source_time_from_output_time(keep_ranges, 0.0),
+            _source_time_from_output_time(keep_ranges, total),
+        ]
     return [
         _source_time_from_output_time(keep_ranges, total * ratio)
-        for ratio in np.linspace(0.15, 0.85, count)
+        for ratio in np.linspace(0.0, 1.0, count)
     ]
+
+
+def _layout_seed_timestamps(
+    keep_ranges: list[tuple[float, float]],
+    *,
+    total_duration: float,
+    uniform_count: int,
+) -> list[float]:
+    """Deterministic layout samples before expensive visual-diff peaks.
+
+    The first seconds of a short are disproportionately visible to the user.
+    Sampling explicit output-relative offsets catches early B-roll/photo/article
+    inserts that uniform source samples can miss after keep-range pruning.
+    """
+    early_output_offsets = (0.5, 2.0, 5.0)
+    timestamps = _uniform_source_timestamps(keep_ranges, uniform_count)
+    timestamps.extend(
+        _source_time_from_output_time(keep_ranges, offset)
+        for offset in early_output_offsets
+        if 0.0 <= offset <= total_duration
+    )
+    return sorted({round(ts, 3) for ts in timestamps})
+
+
+def _merge_layout_timestamps(
+    seed_timestamps: list[float],
+    peak_timestamps: list[float],
+    *,
+    max_count: int,
+) -> list[float]:
+    """Merge layout sample timestamps without dropping deterministic coverage.
+
+    Seed timestamps encode start/early/middle/end coverage. Diff peaks are
+    useful extras, but they must not crowd out seed frames when the sample cap
+    is hit.
+    """
+    seeds = sorted({round(ts, 3) for ts in seed_timestamps})
+    if max_count <= 0:
+        return []
+    if len(seeds) >= max_count:
+        if max_count == 1:
+            return [seeds[0]]
+        keep = {seeds[0], seeds[-1]}
+        interior = seeds[1:-1]
+        slots = max_count - len(keep)
+        if slots > 0 and interior:
+            for idx in np.linspace(0, len(interior) - 1, slots):
+                keep.add(interior[int(round(idx))])
+        return sorted(keep)[:max_count]
+
+    merged = list(seeds)
+    seen = set(seeds)
+    for ts in peak_timestamps:
+        rounded = round(ts, 3)
+        if rounded in seen:
+            continue
+        merged.append(rounded)
+        seen.add(rounded)
+        if len(merged) >= max_count:
+            break
+    return sorted(merged)
+
+
+def _source_time_to_output_time(keep_ranges: list[tuple[float, float]], source_time: float) -> float:
+    elapsed = 0.0
+    for start, end in keep_ranges:
+        if source_time < start:
+            return elapsed
+        if start <= source_time <= end:
+            return elapsed + (source_time - start)
+        elapsed += end - start
+    return elapsed
+
+
+def _source_time_in_keep_ranges(
+    keep_ranges: list[tuple[float, float]],
+    source_time: float,
+) -> bool:
+    return any(start - 1e-6 <= source_time <= end + 1e-6 for start, end in keep_ranges)
+
+
+def _has_visual_evidence(instruction: LayoutInstruction) -> bool:
+    return bool(
+        instruction.split_chart_region
+        or instruction.split_second_chart_region
+        or instruction.split_person_region
+        or instruction.split_second_person_region
+    )
+
+
+def _box_center_close(a: BoundingBox | None, b: BoundingBox | None, tolerance: float) -> bool:
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    return (
+        abs(a.center_x - b.center_x) <= tolerance
+        and abs(a.center_y - b.center_y) <= tolerance
+    )
+
+
+def _layout_geometry_compatible(a: LayoutInstruction, b: LayoutInstruction) -> bool:
+    if a.layout != b.layout:
+        return False
+    if a.layout == LayoutKind.SPLIT_CHART_PERSON:
+        if a.split_chart_region is None or a.split_person_region is None:
+            return b.split_chart_region is None and b.split_person_region is None
+        if b.split_chart_region is None or b.split_person_region is None:
+            return False
+        a_chart_left = a.split_chart_region.center_x < a.split_person_region.center_x
+        b_chart_left = b.split_chart_region.center_x < b.split_person_region.center_x
+        return (
+            a_chart_left == b_chart_left
+            and _box_center_close(a.split_chart_region, b.split_chart_region, 0.18)
+            and _box_center_close(a.split_person_region, b.split_person_region, 0.18)
+        )
+    if a.layout == LayoutKind.SPLIT_TWO_PERSONS:
+        return (
+            _box_center_close(a.split_person_region, b.split_person_region, 0.18)
+            and _box_center_close(
+                a.split_second_person_region, b.split_second_person_region, 0.18
+            )
+        )
+    if a.layout == LayoutKind.SPLIT_TWO_CHARTS:
+        return (
+            _box_center_close(a.split_chart_region, b.split_chart_region, 0.18)
+            and _box_center_close(
+                a.split_second_chart_region, b.split_second_chart_region, 0.18
+            )
+        )
+    if a.layout == LayoutKind.WIDE_VISUAL:
+        return _box_center_close(a.split_chart_region, b.split_chart_region, 0.18)
+    if a.layout in {LayoutKind.SIT_CENTER, LayoutKind.ZOOM_CALL_CENTER}:
+        if a.layout == LayoutKind.SIT_CENTER and a.zoom < 1.0 and b.zoom < 1.0:
+            return True
+        return (
+            abs(a.person_x_norm - b.person_x_norm) <= _SIT_CENTER_GEOMETRY_X_TOLERANCE
+            and abs(a.zoom - b.zoom) <= _SIT_CENTER_GEOMETRY_ZOOM_TOLERANCE
+        )
+    return True
+
+
+def _layout_boundary_time(
+    t0: float,
+    instr0: LayoutInstruction,
+    t1: float,
+    instr1: LayoutInstruction,
+) -> float:
+    """Choose the output-relative boundary between two sampled layouts."""
+    midpoint = (t0 + t1) / 2.0
+    gap = t1 - t0
+    if gap <= 1.5:
+        return midpoint
+    visual0 = _has_visual_evidence(instr0)
+    visual1 = _has_visual_evidence(instr1)
+    if visual0 and not visual1:
+        return t1
+    if not visual0 and visual1:
+        return t1 - min(0.75, gap * 0.25)
+    return midpoint
+
+
+def _coerce_clip_for_timeline(clip: Clip) -> Clip:
+    if isinstance(clip, Clip):
+        return clip
+    return Clip.model_validate(
+        {
+            "clip_id": getattr(clip, "clip_id"),
+            "topic": getattr(clip, "topic", ""),
+            "start_time_sec": getattr(clip, "start_time_sec"),
+            "end_time_sec": getattr(clip, "end_time_sec"),
+            "trim_start_sec": getattr(clip, "trim_start_sec", 0.0),
+            "trim_end_sec": getattr(clip, "trim_end_sec", 0.0),
+            "keep_ranges_sec": getattr(clip, "keep_ranges_sec", []),
+            "layout": getattr(clip, "layout", None),
+            "layout_hint": getattr(clip, "layout_hint", None),
+        }
+    )
+
+
+def _build_layout_timeline(
+    clip: Clip,
+    sampled_frames: list[SampledFrame],
+    frame_instructions: list[LayoutInstruction],
+    *,
+    fallback_instruction: LayoutInstruction,
+) -> list[LayoutTimelineSegment]:
+    """Build a stable output-relative layout timeline from sampled frame layouts."""
+    clip = _coerce_clip_for_timeline(clip)
+    rclip = clip_for_render(clip)
+    keep_ranges = source_keep_ranges(rclip)
+    output_duration = clip_output_duration(rclip)
+    if output_duration <= 0.0:
+        return []
+    if not sampled_frames or not frame_instructions:
+        return [
+            LayoutTimelineSegment(
+                start_sec=0.0,
+                end_sec=output_duration,
+                instruction=fallback_instruction,
+                reason="fallback layout; no frame-level layout samples",
+            )
+        ]
+
+    samples = sorted(
+        zip(sampled_frames, frame_instructions, strict=False),
+        key=lambda item: item[0].timestamp_sec,
+    )
+    samples = [
+        (frame, instruction)
+        for frame, instruction in samples
+        if _source_time_in_keep_ranges(keep_ranges, frame.timestamp_sec)
+    ]
+    timed = [
+        (_source_time_to_output_time(keep_ranges, frame.timestamp_sec), instruction)
+        for frame, instruction in samples
+    ]
+    if not timed:
+        return [
+            LayoutTimelineSegment(
+                start_sec=0.0,
+                end_sec=output_duration,
+                instruction=fallback_instruction,
+                reason="fallback layout; no usable frame-level layout samples",
+            )
+        ]
+
+    boundaries = [0.0]
+    for idx in range(len(timed) - 1):
+        t0, instr0 = timed[idx]
+        t1, instr1 = timed[idx + 1]
+        if _layout_geometry_compatible(instr0, instr1):
+            continue
+        boundaries.append(
+            max(0.0, min(output_duration, _layout_boundary_time(t0, instr0, t1, instr1)))
+        )
+    boundaries.append(output_duration)
+    boundaries = sorted({round(boundary, 6) for boundary in boundaries})
+
+    raw_segments: list[LayoutTimelineSegment] = []
+    for start, end in zip(boundaries, boundaries[1:], strict=False):
+        if end <= start:
+            continue
+        midpoint = (start + end) / 2.0
+        chosen = min(timed, key=lambda item: abs(item[0] - midpoint))[1]
+        raw_segments.append(
+            LayoutTimelineSegment(
+                start_sec=start,
+                end_sec=end,
+                instruction=chosen,
+                reason="frame-level layout timeline",
+            )
+        )
+
+    if not raw_segments:
+        raw_segments = [
+            LayoutTimelineSegment(
+                start_sec=0.0,
+                end_sec=output_duration,
+                instruction=fallback_instruction,
+                reason="fallback layout; empty timeline",
+            )
+        ]
+
+    merged: list[LayoutTimelineSegment] = []
+    for segment in raw_segments:
+        if merged and _layout_geometry_compatible(merged[-1].instruction, segment.instruction):
+            merged[-1] = merged[-1].model_copy(update={"end_sec": segment.end_sec})
+            continue
+        merged.append(segment)
+
+    min_duration = 1.25
+    stabilized: list[LayoutTimelineSegment] = []
+    for segment in merged:
+        duration = segment.end_sec - segment.start_sec
+        if (
+            stabilized
+            and duration < min_duration
+            and not _has_visual_evidence(segment.instruction)
+        ):
+            stabilized[-1] = stabilized[-1].model_copy(update={"end_sec": segment.end_sec})
+            continue
+        stabilized.append(segment)
+    return stabilized
+
+
+def _visual_transition_drop_ranges(
+    clip: Clip,
+    sampled_frames: list[SampledFrame],
+    frame_instructions: list[LayoutInstruction],
+) -> list[tuple[float, float]]:
+    """Return clip-relative transition tails to drop when visuals disappear."""
+    samples = sorted(
+        zip(sampled_frames, frame_instructions, strict=False),
+        key=lambda item: item[0].timestamp_sec,
+    )
+    drops: list[tuple[float, float]] = []
+    for (frame0, instr0), (frame1, instr1) in zip(samples, samples[1:], strict=False):
+        if _has_visual_evidence(instr0) == _has_visual_evidence(instr1):
+            continue
+        gap = max(0.0, frame1.timestamp_sec - frame0.timestamp_sec)
+        pad = min(0.75, max(0.15, gap * 0.2))
+        start = max(clip.start_time_sec, frame1.timestamp_sec - pad)
+        end = min(clip.end_time_sec, frame1.timestamp_sec)
+        rel_start = round(start - clip.start_time_sec, 3)
+        rel_end = round(end - clip.start_time_sec, 3)
+        if rel_end - rel_start >= 0.2:
+            drops.append((rel_start, rel_end))
+    return drops
 
 
 def _sample_frame_signature(cap: Any, timestamp_sec: float) -> np.ndarray | None:
@@ -563,17 +982,24 @@ def _sample_clip_frames(
     if not keep_ranges or total_duration <= 0.0:
         return [], [f"Clip {clip.clip_id} has no non-empty keep ranges for layout sampling."]
 
-    uniform_count = 4 if total_duration >= 20.0 else 3
-    peak_count = 2 if total_duration < 20.0 else 3
-    timestamps = _uniform_source_timestamps(keep_ranges, uniform_count)
+    uniform_count = 5 if total_duration >= 20.0 else 3
+    peak_count = 4 if total_duration < 20.0 else 8
+    timestamps = _layout_seed_timestamps(
+        keep_ranges,
+        total_duration=total_duration,
+        uniform_count=uniform_count,
+    )
     peak_ts, peak_warnings = _frame_diff_peak_timestamps(
         source_video,
         keep_ranges,
         peak_count=peak_count,
     )
     warnings.extend(peak_warnings)
-    timestamps.extend(peak_ts)
-    timestamps = sorted({round(ts, 3) for ts in timestamps})[:_MAX_SAMPLED_FRAMES]
+    timestamps = _merge_layout_timestamps(
+        timestamps,
+        peak_ts,
+        max_count=_MAX_SAMPLED_FRAMES,
+    )
 
     clip_dir = keyframes_root / clip.clip_id
     clip_dir.mkdir(parents=True, exist_ok=True)
@@ -684,9 +1110,9 @@ def infer_layout_instructions(
     gemini_vision_model: str,
     provider: str,
     keyframes_root: Path,
-) -> tuple[dict[str, LayoutInstruction], dict[str, dict[str, Any]]]:
-    """Return ``(clip_id -> LayoutInstruction, clip_id -> cache payload)``."""
-    out: dict[str, LayoutInstruction] = {}
+) -> tuple[dict[str, ClipLayoutPlan], dict[str, dict[str, Any]]]:
+    """Return ``(clip_id -> ClipLayoutPlan, clip_id -> cache payload)``."""
+    out: dict[str, ClipLayoutPlan] = {}
     payload_by_clip: dict[str, dict[str, Any]] = {}
     model_name = gemini_vision_model.strip()
 
@@ -700,9 +1126,18 @@ def infer_layout_instructions(
         warnings.extend(sample_warnings)
         if not sampled_frames:
             fallback = _fallback_layout_instruction(clip)
-            out[clip.clip_id] = fallback
-            payload_by_clip[clip.clip_id] = {
-                "instruction": json.loads(fallback.model_dump_json()),
+            plan = ClipLayoutPlan(
+                clip_id=clip.clip_id,
+                instruction=fallback,
+                layout_timeline=_build_layout_timeline(
+                    clip,
+                    [],
+                    [],
+                    fallback_instruction=fallback,
+                ),
+            )
+            out[clip.clip_id] = plan
+            payload_by_clip[clip.clip_id] = plan.to_layout_cache_payload() | {
                 "sampled_frames": [],
                 "frame_results": [],
                 "raw": {"error": "no sampled frames", "layout": fallback.layout.value},
@@ -784,9 +1219,26 @@ def infer_layout_instructions(
         if merged_instruction is None:
             merged_instruction = _fallback_merge(clip, frame_instructions)
 
-        out[clip.clip_id] = merged_instruction
-        payload_by_clip[clip.clip_id] = {
-            "instruction": json.loads(merged_instruction.model_dump_json()),
+        visual_drop_ranges = _visual_transition_drop_ranges(
+            clip,
+            sampled_frames,
+            frame_instructions,
+        )
+        timeline_clip = apply_visual_drop_ranges(clip, visual_drop_ranges)
+        timeline = _build_layout_timeline(
+            timeline_clip,
+            sampled_frames,
+            frame_instructions,
+            fallback_instruction=merged_instruction,
+        )
+        plan = ClipLayoutPlan(
+            clip_id=clip.clip_id,
+            instruction=merged_instruction,
+            layout_timeline=timeline,
+            visual_drop_ranges_sec=visual_drop_ranges,
+        )
+        out[clip.clip_id] = plan
+        payload_by_clip[clip.clip_id] = plan.to_layout_cache_payload() | {
             "sampled_frames": [
                 {
                     "frame_id": frame.frame_id,
@@ -816,7 +1268,7 @@ def run_layout_vision_stage(
     clips: list[Clip],
     transcript_fp: str,
     config: PipelineConfig,
-) -> dict[str, LayoutInstruction]:
+) -> dict[str, ClipLayoutPlan]:
     """Load cache or call the configured layout vision model on multiple frames per clip."""
     clip_windows_fp = _clip_windows_fingerprint(clips)
     provider = resolved_llm_provider(config)
@@ -836,7 +1288,7 @@ def run_layout_vision_stage(
         if cached:
             logger.info("Layout vision cache hit; skipping model calls.")
             return {
-                clip_id: LayoutInstruction.model_validate(payload["instruction"])
+                clip_id: ClipLayoutPlan.from_layout_cache_payload(clip_id, payload)
                 for clip_id, payload in cached.items()
                 if isinstance(payload, dict) and "instruction" in payload
             }

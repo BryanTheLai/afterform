@@ -65,6 +65,10 @@ Behavior:
 - over-generate a candidate pool
 - rank locally
 - keep a thresholded set with a floor and cap
+- optional exhaustive mode keeps every distinct quality-clearing candidate
+  without an arbitrary final cap
+- exhaustive mode writes `clip_selection_dedupe.json` so duplicate drops are
+  inspectable
 
 ## Stage 2.25: Hook detection
 
@@ -182,6 +186,11 @@ The reusable deterministic building blocks live in:
 | `--llm-provider` | `PipelineConfig.llm_provider` |
 | `--llm-model` | `PipelineConfig.llm_model` |
 | `--llm-vision-model` | `PipelineConfig.llm_vision_model` |
+| `--clip-mode` | `clip_selection_mode` |
+| `--clip-candidate-count` | `clip_selection_candidate_count` |
+| `--clip-quality-threshold` | `clip_selection_quality_threshold` |
+| `--max-clips` | `clip_selection_max_kept` |
+| `--review-only-clips` | `stop_after="clip-selection"` |
 | `--force-clip-selection` | `force_clip_selection` |
 | `--force-hook-detection` | `force_hook_detection` |
 | `--force-content-pruning` | `force_content_pruning` |

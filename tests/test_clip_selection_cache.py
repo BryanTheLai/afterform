@@ -3,6 +3,7 @@
 from afterform.flows.long_to_shorts.clip_selection_cache import (
     CURRENT_META_VERSION,
     cache_valid,
+    clip_selection_policy,
     load_meta,
     transcript_fingerprint,
     write_artifacts,
@@ -66,4 +67,29 @@ def test_legacy_v1_openai_meta_invalidates(tmp_path):
         "openai_model": "gpt-4o",
     }
     assert not cache_valid(meta, transcript_fingerprint(tr), cfg)
+
+
+def test_cache_policy_records_exhaustive_mode_and_uncapped_max():
+    cfg = PipelineConfig(
+        youtube_url="https://youtu.be/x",
+        clip_selection_mode="exhaustive",
+        clip_selection_max_kept=None,
+    )
+    policy = clip_selection_policy(cfg)
+    assert policy["mode"] == "exhaustive"
+    assert policy["max_kept"] is None
+    assert policy["dedupe_policy_version"] >= 1
+
+
+def test_cache_invalidates_on_clip_selection_mode_change(tmp_path):
+    tr = {"segments": []}
+    cfg = PipelineConfig(youtube_url="https://youtu.be/x", clip_selection_mode="curated")
+    write_artifacts(tmp_path, transcript=tr, config=cfg, raw_response="{}")
+    meta = load_meta(tmp_path)
+    cfg2 = PipelineConfig(
+        youtube_url="https://youtu.be/x",
+        clip_selection_mode="exhaustive",
+        clip_selection_max_kept=None,
+    )
+    assert not cache_valid(meta, transcript_fingerprint(tr), cfg2)
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -81,10 +81,11 @@ class LayoutKind(str, Enum):
     """The 9:16 layouts. A short contains **at most two** on-screen items.
 
     An "item" is one of ``person`` (a human speaker) or ``chart`` (slide, graph,
-    data visual, screenshare). Five combinations are allowed:
+    data visual, screenshare). Six combinations are allowed:
 
     - ``ZOOM_CALL_CENTER``:   **1 person**, tight webcam/zoom-call framing, centered.
     - ``SIT_CENTER``:         **1 person**, interview/seated framing, centered.
+    - ``WIDE_VISUAL``:        **1 wide visual**, full source contained in 9:16.
     - ``SPLIT_CHART_PERSON``: **1 chart + 1 person** â€” chart + speaker share the
                               source frame. Output stacks them vertically
                               (by default ``focus_stack_order`` = chart-on-top).
@@ -99,6 +100,7 @@ class LayoutKind(str, Enum):
 
     ZOOM_CALL_CENTER = "zoom_call_center"
     SIT_CENTER = "sit_center"
+    WIDE_VISUAL = "wide_visual"
     SPLIT_CHART_PERSON = "split_chart_person"
     SPLIT_TWO_PERSONS = "split_two_persons"
     SPLIT_TWO_CHARTS = "split_two_charts"
@@ -181,6 +183,76 @@ class LayoutInstruction(BaseModel):
             "0.6 historically matched the 'chart dominant / person small' look."
         ),
     )
+
+
+class LayoutTimelineSegment(BaseModel):
+    """Output-relative span rendered with one layout instruction.
+
+    ``start_sec`` / ``end_sec`` are measured after trim + keep-range pruning,
+    i.e. in the final short's timeline before subtitles are burned.
+    """
+
+    start_sec: float = Field(ge=0.0)
+    end_sec: float = Field(gt=0.0)
+    instruction: LayoutInstruction
+    reason: str = ""
+
+    @model_validator(mode="after")
+    def _timing_consistency(self) -> "LayoutTimelineSegment":
+        if self.end_sec <= self.start_sec:
+            raise ValueError("layout timeline segment end_sec must be greater than start_sec")
+        return self
+
+
+class ClipLayoutPlan(BaseModel):
+    """Render layout plan for a clip.
+
+    ``instruction`` is the backward-compatible single-layout fallback.
+    ``layout_timeline`` is optional; when it contains multiple segments the
+    renderer can switch layouts inside one short.
+    """
+
+    clip_id: str
+    instruction: LayoutInstruction
+    layout_timeline: list[LayoutTimelineSegment] = Field(default_factory=list)
+    visual_drop_ranges_sec: list[tuple[float, float]] = Field(
+        default_factory=list,
+        description=(
+            "Clip-relative spans removed because frame-level vision detected "
+            "short visual transition cards while audio continued."
+        ),
+    )
+
+    @property
+    def layout(self) -> LayoutKind:
+        """Backward-compatible access to the fallback instruction layout."""
+        return self.instruction.layout
+
+    @classmethod
+    def from_layout_cache_payload(cls, clip_id: str, payload: dict[str, Any]) -> "ClipLayoutPlan":
+        """Build a layout plan from one ``layout_vision.json`` clip payload."""
+        return cls.model_validate(
+            {
+                "clip_id": clip_id,
+                "instruction": payload["instruction"],
+                "layout_timeline": [
+                    segment
+                    for segment in payload.get("layout_timeline", []) or []
+                    if isinstance(segment, dict)
+                ],
+                "visual_drop_ranges_sec": payload.get("visual_drop_ranges_sec", []) or [],
+            }
+        )
+
+    def to_layout_cache_payload(self) -> dict[str, Any]:
+        """Serialize the plan fields persisted in ``layout_vision.json``."""
+        return {
+            "instruction": self.instruction.model_dump(mode="json"),
+            "layout_timeline": [
+                segment.model_dump(mode="json") for segment in self.layout_timeline
+            ],
+            "visual_drop_ranges_sec": [[start, end] for start, end in self.visual_drop_ranges_sec],
+        }
 
 
 class SceneClassification(BaseModel):

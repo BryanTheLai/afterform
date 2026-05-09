@@ -6,6 +6,33 @@ from pathlib import Path
 from afterform import cli
 
 
+def test_afterform_run_dir_expands_to_work_and_output(monkeypatch, tmp_path: Path):
+    calls: dict[str, object] = {}
+
+    def fake_run_pipeline(config):
+        calls["youtube_url"] = config.youtube_url
+        calls["work_dir"] = config.work_dir
+        calls["output_dir"] = config.output_dir
+        return []
+
+    monkeypatch.setattr(cli, "run_pipeline", fake_run_pipeline)
+
+    run_dir = tmp_path / "run_001"
+    cli.main(
+        [
+            "run",
+            "long-to-shorts",
+            "https://youtube.com/watch?v=abc123",
+            "--run-dir",
+            str(run_dir),
+        ]
+    )
+
+    assert calls["youtube_url"] == "https://youtube.com/watch?v=abc123"
+    assert calls["work_dir"] == run_dir / "work"
+    assert calls["output_dir"] == run_dir / "output"
+
+
 def test_afterform_inspect_only_does_not_require_url(monkeypatch, tmp_path: Path, capsys):
     calls: dict[str, object] = {}
 

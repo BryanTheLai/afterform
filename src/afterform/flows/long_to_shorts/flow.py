@@ -17,9 +17,10 @@ from afterform.flows.long_to_shorts.clip_selection_cache import (
     write_artifacts,
 )
 from afterform.flows.long_to_shorts.select_clips import (
+    filter_clip_candidates,
     load_candidate_pool_from_raw_response,
     load_clips,
-    rank_and_filter_clips,
+    save_dedupe_report,
     save_clips,
     select_clips,
 )
@@ -37,8 +38,8 @@ from afterform.flows.long_to_shorts.stage_inspection import (
     stage_range,
     write_inspection,
 )
-from afterform.flows.long_to_shorts.render_window import clip_for_render
-from afterform.flows.long_to_shorts.render import reframe_clip_ffmpeg
+from afterform.flows.long_to_shorts.render_window import apply_visual_drop_ranges, clip_for_render
+from afterform.flows.long_to_shorts.render import reframe_clip_ffmpeg, reframe_clip_timeline_ffmpeg
 from afterform.flows.long_to_shorts.video_cache import (
     extract_youtube_video_id,
     ingest_complete,
@@ -137,6 +138,7 @@ def _run_clip_selection_stage(config: PipelineConfig, state: PipelineState) -> P
     assert state.transcript_fp is not None
 
     clips_path = config.work_dir / "clips.json"
+    dedupe_report_path = config.work_dir / "clip_selection_dedupe.json"
     fp = state.transcript_fp
     meta = load_meta(config.work_dir)
 
@@ -166,12 +168,20 @@ def _run_clip_selection_stage(config: PipelineConfig, state: PipelineState) -> P
             raise RuntimeError(
                 "clips.meta.json says re-rank is possible, but clip_selection_raw.json is missing."
             )
-        candidates = load_candidate_pool_from_raw_response(raw)
-        clips = rank_and_filter_clips(
+        candidates = load_candidate_pool_from_raw_response(raw, transcript=state.transcript)
+        clips, decisions = filter_clip_candidates(
             candidates,
-            quality_threshold=config.clip_selection_quality_threshold,
+            threshold=config.clip_selection_quality_threshold,
             min_kept=config.clip_selection_min_kept,
             max_kept=config.clip_selection_max_kept,
+            mode=config.clip_selection_mode,
+        )
+        save_dedupe_report(
+            dedupe_report_path,
+            decisions=decisions,
+            candidate_count=len(candidates),
+            kept_count=len(clips),
+            mode=config.clip_selection_mode,
         )
         save_clips(clips, clips_path)
         write_artifacts(
@@ -190,6 +200,8 @@ def _run_clip_selection_stage(config: PipelineConfig, state: PipelineState) -> P
             quality_threshold=config.clip_selection_quality_threshold,
             min_kept=config.clip_selection_min_kept,
             max_kept=config.clip_selection_max_kept,
+            selection_mode=config.clip_selection_mode,
+            dedupe_report_path=dedupe_report_path,
         )
         save_clips(clips, clips_path)
         write_artifacts(
@@ -270,11 +282,15 @@ def _run_render_stage(config: PipelineConfig, state: PipelineState) -> list[Path
     layout_instructions = state.layout_instructions or {}
 
     for clip in state.clips:
-        instr = layout_instructions.get(clip.clip_id)
-        if instr is None:
+        layout_plan = layout_instructions.get(clip.clip_id)
+        if layout_plan is None:
             hint = clip.layout_hint or LayoutKind.SIT_CENTER
             instr = LayoutInstruction(clip_id=clip.clip_id, layout=hint)
+        else:
+            instr = layout_plan.instruction
         clip.layout = instr.layout
+        if layout_plan is not None and layout_plan.visual_drop_ranges_sec:
+            clip = apply_visual_drop_ranges(clip, layout_plan.visual_drop_ranges_sec)
         rclip = clip_for_render(clip)
         subtitle_path = generate_ass(
             rclip,
@@ -295,16 +311,28 @@ def _run_render_stage(config: PipelineConfig, state: PipelineState) -> list[Path
         if final_path.exists() and config.overwrite_outputs:
             logger.info("Clip %s exists; overwriting due to clean-run settings.", clip.clip_id)
 
-        reframe_clip_ffmpeg(
-            input_path=state.source_video,
-            output_path=final_path,
-            clip=rclip,
-            layout_instruction=instr,
-            subtitle_path=subtitle_path,
-            subtitle_font_size=config.subtitle_font_size,
-            subtitle_margin_v=config.subtitle_margin_v,
-            title_text=clip.suggested_overlay_title,
-        )
+        if layout_plan is not None and len(layout_plan.layout_timeline) > 1:
+            reframe_clip_timeline_ffmpeg(
+                input_path=state.source_video,
+                output_path=final_path,
+                clip=rclip,
+                layout_plan=layout_plan,
+                subtitle_path=subtitle_path,
+                subtitle_font_size=config.subtitle_font_size,
+                subtitle_margin_v=config.subtitle_margin_v,
+                title_text=clip.suggested_overlay_title,
+            )
+        else:
+            reframe_clip_ffmpeg(
+                input_path=state.source_video,
+                output_path=final_path,
+                clip=rclip,
+                layout_instruction=instr,
+                subtitle_path=subtitle_path,
+                subtitle_font_size=config.subtitle_font_size,
+                subtitle_margin_v=config.subtitle_margin_v,
+                title_text=clip.suggested_overlay_title,
+            )
         final_outputs.append(final_path)
 
     return final_outputs

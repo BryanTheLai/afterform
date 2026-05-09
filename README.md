@@ -53,7 +53,16 @@ Optional extras:
 uv sync --extra dev
 uv sync --extra whisper
 uv sync --extra face
+uv sync --extra filled-pause
 ```
+
+Filled-pause pruning runtime:
+
+- default runs now try to remove short `um/uh/hmm` spans during Stage 2.5
+- install the runtime with `uv sync --extra filled-pause`
+- first use downloads the Hugging Face model `classla/wav2vecbert2-filledPause`
+- if the runtime is unavailable, Afterform degrades safely and keeps the original audio
+- use `--require-filled-pause-pruning` to fail instead of silently skipping
 
 ## Run
 
@@ -61,11 +70,57 @@ uv sync --extra face
 uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
+Recommended pattern for real work:
+
+- use one isolated run folder per attempt
+- use `--run-dir` so intermediates and finals do not collide
+- default Azure recommendation: `gpt-5.4`, not `gpt-5.5`
+
+```bash
+uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=4SlNgM4PjvQ" \
+  --run-dir ".afterform_runs/yt_20260508_093000" \
+  --llm-provider azure \
+  --llm-model gpt-5.4 \
+  --llm-vision-model gpt-5.4 \
+  --verbose
+```
+
+```powershell
+uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=4SlNgM4PjvQ" --run-dir ".afterform_runs/waterloo-sam-altman" --llm-provider azure --llm-model gpt-5.4 --llm-vision-model gpt-5.4 --verbose
+
+```
+
+What `--run-dir` does:
+
+- writes intermediates to `<run-dir>/work`
+- writes final shorts to `<run-dir>/output`
+
+Why this matters:
+
+- default output is `./output`
+- `--clean-run` enables output overwrite behavior
+- reusing one folder makes it easy to lose track of partial progress
+
+Resume an interrupted run from cached artifacts:
+
+```bash
+uv run afterform run long-to-shorts \
+  --work-dir ".afterform_runs/yt_20260508_093000/work" \
+  --output ".afterform_runs/yt_20260508_093000/output" \
+  --start-at layout-vision \
+  --llm-provider azure \
+  --llm-model gpt-5.4 \
+  --llm-vision-model gpt-5.4 \
+  --verbose
+```
+
 Useful variants:
 
 ```bash
 uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID" --clean-run --verbose
-uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID" --llm-provider azure --llm-model gpt-5.4 --llm-vision-model gpt-5.4
+uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID" --run-dir ".afterform_runs/yt_20260508_093000" --llm-provider azure --llm-model gpt-5.4 --llm-vision-model gpt-5.4
+uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID" --no-filled-pause-pruning
+uv run afterform run long-to-shorts "https://www.youtube.com/watch?v=VIDEO_ID" --require-filled-pause-pruning
 uv run afterform --help
 ```
 
@@ -86,14 +141,13 @@ More flows can be added later without changing the package model.
 | `src/afterform/primitives/` | reusable building blocks |
 | `src/afterform/flows/long_to_shorts/` | current production flow |
 | `tests/` | test suite |
-| `docs/` | design, pipeline, environment, and architecture docs |
+| `docs/` | public setup and usage docs |
 
 ## Docs
 
 - [`docs/README.md`](docs/README.md)
 - [`docs/PIPELINE.md`](docs/PIPELINE.md)
 - [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)
-- [`docs/mcp_architecture.md`](docs/mcp_architecture.md)
 
 ## Verify
 

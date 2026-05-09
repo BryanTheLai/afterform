@@ -3,6 +3,7 @@
 import pytest
 
 from afterform.flows.long_to_shorts.render_window import (
+    apply_visual_drop_ranges,
     clip_for_render,
     effective_export_bounds,
     effective_keep_ranges,
@@ -63,6 +64,19 @@ def test_keep_ranges_are_intersected_with_outer_trim_window():
     )
     assert effective_keep_ranges(c) == [(5.0, 8.0), (12.0, 20.0), (25.0, 27.0)]
     assert source_keep_ranges(c) == [(105.0, 108.0), (112.0, 120.0), (125.0, 127.0)]
+
+
+def test_apply_visual_drop_ranges_splits_existing_keep_span():
+    c = _clip(keep_ranges_sec=[(0.0, 10.0), (12.0, 20.0)])
+
+    updated = apply_visual_drop_ranges(c, [(4.0, 5.0), (14.0, 15.5)])
+
+    assert updated.keep_ranges_sec == [
+        (0.0, 4.0),
+        (5.0, 10.0),
+        (12.0, 14.0),
+        (15.5, 20.0),
+    ]
 
 
 def test_clip_for_render_normalizes_inner_keep_gaps():

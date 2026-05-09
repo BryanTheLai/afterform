@@ -47,3 +47,6 @@ keyframes/
 .DS_Store
 Thumbs.db
 competitors_code
+/factory
+docs/bryans_ideas.md
+/super-secret
