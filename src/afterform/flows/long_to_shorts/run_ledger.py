@@ -104,6 +104,12 @@ class RunLedger:
         self.data["error"] = {"stage": stage, "type": exc.__class__.__name__, "message": str(exc)}
         self.write()
 
+    def fail_run(self, exc: BaseException, *, stage: str | None = None) -> None:
+        self.data["status"] = "failed"
+        self.data["finished_at"] = _utc_now()
+        self.data["error"] = {"stage": stage, "type": exc.__class__.__name__, "message": str(exc)}
+        self.write()
+
     def finish_run(self, outputs: list[Path]) -> None:
         self.data["status"] = "completed"
         self.data["finished_at"] = _utc_now()
@@ -113,15 +119,24 @@ class RunLedger:
     def _collect_stage_artifacts(self, stage: str, *, extra_artifacts: list[str] | None = None) -> list[str]:
         assert self.config.work_dir is not None
         artifacts: list[str] = []
+        seen: set[str] = set()
+
+        def append_artifact(path: Path) -> None:
+            value = str(path)
+            if value in seen:
+                return
+            seen.add(value)
+            artifacts.append(value)
+
         for rel in STAGE_ARTIFACTS.get(stage, []):
             path = self.config.work_dir / rel
             if path.exists():
-                artifacts.append(str(path))
+                append_artifact(path)
         if stage == "render":
             for path in sorted(self.config.output_dir.glob("short_*.mp4")):
-                artifacts.append(str(path))
+                append_artifact(path)
         if extra_artifacts:
             for rel in extra_artifacts:
                 path = Path(rel)
-                artifacts.append(str(path))
+                append_artifact(path)
         return artifacts

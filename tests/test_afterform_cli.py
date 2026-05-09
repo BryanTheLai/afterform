@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 from afterform import cli
 
 
@@ -113,6 +115,20 @@ def test_default_no_video_cache_run_uses_isolated_work_dir(monkeypatch):
     assert calls["work_dir"] == run_dir / "work"
     assert calls["output_dir"] == run_dir / "output"
     assert calls["use_video_cache"] is False
+
+
+def test_no_video_cache_artifact_only_run_still_requires_work_dir(monkeypatch, capsys):
+    def fail_run_pipeline(config):
+        raise AssertionError("run_pipeline should not execute when work-dir validation fails")
+
+    monkeypatch.setattr(cli, "run_pipeline", fail_run_pipeline)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["run", "long-to-shorts", "--start-at", "render", "--no-video-cache"])
+
+    captured = capsys.readouterr()
+    assert exc.value.code == 2
+    assert "--work-dir is required when the source URL is omitted." in captured.err
 
 
 def test_afterform_inspect_only_does_not_require_url(monkeypatch, tmp_path: Path, capsys):

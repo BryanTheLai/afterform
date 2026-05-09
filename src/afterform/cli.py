@@ -455,7 +455,7 @@ def main(argv: list[str] | None = None) -> None:
         force_hook_detection = True
         overwrite_outputs = True
 
-    if work_dir is None and run_dir is not None and (auto_run_dir and not use_video_cache):
+    if work_dir is None and run_dir is not None and auto_run_dir and not use_video_cache and source is not None:
         work_dir = run_dir / "work"
 
     config = PipelineConfig(

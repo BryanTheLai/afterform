@@ -454,7 +454,9 @@ def run_pipeline(config: PipelineConfig) -> list[Path]:
                 raise
             ledger.finish_stage("render", extra_artifacts=[str(p) for p in final_outputs])
             _write_stage_inspection_if_requested(config, stage="render")
-    except Exception:
+    except Exception as exc:
+        if ledger.data["status"] != "failed":
+            ledger.fail_run(exc)
         raise
 
     logger.info("=" * 60)
