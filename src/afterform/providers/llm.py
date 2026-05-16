@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from google import genai
 from google.genai import types as gemini_types
@@ -33,6 +33,8 @@ from afterform.env import (
 from afterform.providers.gemini import gemini_generate_config
 
 ProviderName = Literal["gemini", "openai", "azure"]
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+TextVerbosity = Literal["low", "medium", "high"]
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
 _GEMINI_RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504]
@@ -184,6 +186,9 @@ class StructuredLlmRequest(Generic[SchemaT]):
     images: tuple[LlmImageInput, ...] = field(default_factory=tuple)
     timeout_ms: int | None = None
     max_retries: int = 0
+    max_output_tokens: int | None = None
+    reasoning_effort: ReasoningEffort | None = None
+    verbosity: TextVerbosity | None = None
 
 
 @dataclass(frozen=True)
@@ -347,15 +352,18 @@ def call_structured_llm(
             timeout_ms=request.timeout_ms,
             max_retries=request.max_retries,
         )
+        generate_config: dict[str, Any] = {
+            "system_instruction": request.system_instruction,
+            "temperature": request.temperature,
+            "response_mime_type": "application/json",
+            "response_schema": request.response_schema,
+        }
+        if request.max_output_tokens is not None:
+            generate_config["max_output_tokens"] = request.max_output_tokens
         response = client.models.generate_content(
             model=request.model,
             contents=converter.to_gemini_contents(request),
-            config=gemini_generate_config(
-                system_instruction=request.system_instruction,
-                temperature=request.temperature,
-                response_mime_type="application/json",
-                response_schema=request.response_schema,
-            ),
+            config=gemini_generate_config(**generate_config),
         )
         return converter.parse_gemini_response(response, request.response_schema)
     if provider_name == "openai":
@@ -368,12 +376,19 @@ def call_structured_llm(
             timeout_ms=request.timeout_ms,
             max_retries=request.max_retries,
         )
-    response = client.responses.parse(
-        model=request.model,
-        instructions=request.system_instruction,
-        input=converter.to_openai_input(request),
-        temperature=request.temperature,
-        text_format=request.response_schema,
-    )
+    parse_kwargs: dict[str, Any] = {
+        "model": request.model,
+        "instructions": request.system_instruction,
+        "input": converter.to_openai_input(request),
+        "temperature": request.temperature,
+        "text_format": request.response_schema,
+    }
+    if request.max_output_tokens is not None:
+        parse_kwargs["max_output_tokens"] = request.max_output_tokens
+    if request.reasoning_effort is not None:
+        parse_kwargs["reasoning"] = {"effort": request.reasoning_effort}
+    if request.verbosity is not None:
+        parse_kwargs["text"] = {"verbosity": request.verbosity}
+    response = client.responses.parse(**parse_kwargs)
     return converter.parse_openai_response(response, request.response_schema)
 

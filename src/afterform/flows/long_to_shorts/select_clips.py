@@ -20,7 +20,9 @@ from afterform.config import (
     TARGET_CLIP_COUNT,
 )
 from afterform.providers.llm import (
+    ReasoningEffort,
     StructuredLlmRequest,
+    TextVerbosity,
     call_structured_llm,
     resolved_llm_provider,
     resolved_text_model,
@@ -55,6 +57,9 @@ DEFAULT_MAX_KEPT = 8
 # do not get word-salad IDs or timestamps.
 DEFAULT_CANDIDATE_TEMPERATURE = 0.7
 DEFAULT_SELECTION_MODE = "curated"
+CLIP_SELECTION_MIN_OUTPUT_TOKENS = 4096
+CLIP_SELECTION_OUTPUT_TOKENS_PER_CANDIDATE = 4000
+CLIP_SELECTION_MAX_OUTPUT_TOKENS = 32000
 
 # Operator-visible ranking contract. If these weights change, the kept set
 # can change even when Gemini returns the same raw candidate pool, so the
@@ -220,6 +225,28 @@ def _default_selection_reason(rule_scores: list[RuleScore], score: float) -> str
             continue
         parts.append(f"{weight:.2f}*{rule_id}={item.score:.2f}")
     return f"Composite {score:.2f} from " + ", ".join(parts)
+
+
+def clip_selection_max_output_tokens(candidate_count: int) -> int:
+    count = max(1, int(candidate_count))
+    return min(
+        CLIP_SELECTION_MAX_OUTPUT_TOKENS,
+        max(
+            CLIP_SELECTION_MIN_OUTPUT_TOKENS,
+            count * CLIP_SELECTION_OUTPUT_TOKENS_PER_CANDIDATE,
+        ),
+    )
+
+
+def _openai_reasoning_options(
+    provider: str,
+    model_name: str,
+) -> tuple[ReasoningEffort | None, TextVerbosity | None]:
+    if provider not in {"openai", "azure"}:
+        return None, None
+    if not model_name.strip().lower().startswith("gpt-5"):
+        return None, None
+    return "none", "low"
 
 
 def _candidate_to_clip(candidate: _ClipSelectionCandidate) -> Clip:
@@ -669,14 +696,17 @@ def select_clips(
     system_prompt, user_text = build_prompt(
         transcript, candidate_count=candidate_count
     )
+    output_token_budget = clip_selection_max_output_tokens(candidate_count)
+    reasoning_effort, verbosity = _openai_reasoning_options(provider, model_name)
 
     def _call() -> tuple[str, ClipSelectionResponse | None]:
         logger.info(
-            "%s clip selection (model=%s, candidate_pool=%d, temp=%.2f)...",
+            "%s clip selection (model=%s, candidate_pool=%d, temp=%.2f, max_output_tokens=%d)...",
             provider,
             model_name,
             candidate_count,
             temperature,
+            output_token_budget,
         )
         response = call_structured_llm(
             StructuredLlmRequest(
@@ -686,6 +716,9 @@ def select_clips(
                 user_text=user_text,
                 temperature=temperature,
                 response_schema=ClipSelectionResponse,
+                max_output_tokens=output_token_budget,
+                reasoning_effort=reasoning_effort,
+                verbosity=verbosity,
             ),
             provider=provider,
         )

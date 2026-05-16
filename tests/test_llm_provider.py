@@ -95,6 +95,7 @@ def test_call_structured_llm_uses_gemini_client(monkeypatch):
             system_instruction="sys",
             user_text="hello",
             response_schema=_Response,
+            max_output_tokens=1234,
         ),
         provider="gemini",
     )
@@ -103,6 +104,7 @@ def test_call_structured_llm_uses_gemini_client(monkeypatch):
     assert seen["api_key"] == "test-gemini-key"
     assert seen["model"] == "gemini-3-flash-preview"
     assert seen["contents"] == "hello"
+    assert seen["config"].max_output_tokens == 1234
 
 
 def test_call_structured_llm_uses_openai_client(monkeypatch):
@@ -134,6 +136,9 @@ def test_call_structured_llm_uses_openai_client(monkeypatch):
             user_text="hello",
             response_schema=_Response,
             timeout_ms=12_000,
+            max_output_tokens=4567,
+            reasoning_effort="minimal",
+            verbosity="low",
         ),
         provider="openai",
     )
@@ -147,6 +152,9 @@ def test_call_structured_llm_uses_openai_client(monkeypatch):
     assert seen["parse"]["instructions"] == "sys"
     assert seen["parse"]["input"] == "hello"
     assert seen["parse"]["text_format"] is _Response
+    assert seen["parse"]["max_output_tokens"] == 4567
+    assert seen["parse"]["reasoning"] == {"effort": "minimal"}
+    assert seen["parse"]["text"] == {"verbosity": "low"}
 
 
 def test_call_structured_llm_uses_azure_endpoint(monkeypatch):
@@ -194,6 +202,9 @@ def test_call_structured_llm_uses_azure_endpoint(monkeypatch):
             user_text="hello",
             response_schema=_Response,
             timeout_ms=7_500,
+            max_output_tokens=8910,
+            reasoning_effort="low",
+            verbosity="medium",
         ),
         provider="azure",
     )
@@ -206,6 +217,9 @@ def test_call_structured_llm_uses_azure_endpoint(monkeypatch):
     assert seen["base_url"] is None
     assert seen["timeout"] == 7.5
     assert seen["max_retries"] == 0
+    assert seen["parse"]["max_output_tokens"] == 8910
+    assert seen["parse"]["reasoning"] == {"effort": "low"}
+    assert seen["parse"]["text"] == {"verbosity": "medium"}
 
 
 def test_call_structured_llm_uses_azure_base_url(monkeypatch):
